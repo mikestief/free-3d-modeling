@@ -139,7 +139,9 @@ used, not a live driver — edit `PARAMS` in the script and re-run.
 | Supports | **None** — print flat on the base as oriented |
 | Brim | Not required on textured PEI |
 
-Roughly **7–12 h**, depending on printer and settings.
+Roughly **7–12 h** and **~350 g** of filament — the figure Bambu Studio
+reported when slicing at these settings. Both move with your printer and
+profile.
 
 ---
 

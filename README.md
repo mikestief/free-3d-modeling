@@ -17,7 +17,7 @@ needed and nothing owed.
 
 | Model | What it is | Size | Print | Status |
 |---|---|---|---|---|
-| **[Whiteboard Caddy](whiteboard-stand/)** | Classroom desk caddy for lap whiteboards, markers and erasers | 244 × 159 × 94 mm | 7–12 h · PETG · no supports | ✅ Printed and in use |
+| **[Whiteboard Caddy](whiteboard-stand/)** | Classroom desk caddy for lap whiteboards, markers and erasers | 244 × 159 × 94 mm | 7–12 h · ~350 g PETG · no supports | ✅ Printed and in use |
 
 ---
 
