@@ -139,9 +139,21 @@ used, not a live driver — edit `PARAMS` in the script and re-run.
 | Supports | **None** — print flat on the base as oriented |
 | Brim | Not required on textured PEI |
 
-Roughly **7–12 h** and **~350 g** of filament — the figure Bambu Studio
-reported when slicing at these settings. Both move with your printer and
-profile.
+### Reference slice
+
+Bambu Studio, Bambu Lab X2D, PETG, 0.4 mm nozzle, at the settings above:
+
+| | |
+|---|---|
+| Filament | **347.54 g** — 115.59 m |
+| Model printing time | 11 h 21 m |
+| Total time | **11 h 27 m** |
+| Filament changes | 0 |
+| Cost estimate | 6.25, at the price set in the filament profile |
+
+Expect **7–12 h** and **~350 g** across printers and profiles. Time moves a lot
+with layer height, speed profile and machine; filament barely moves at all,
+since it is set by the geometry.
 
 ---
 
