@@ -13,8 +13,8 @@ As configured it holds **8 lap boards** (9"×12"), **10 markers** and
 | | |
 |---|---|
 | Size | 244 × 159 × 94 mm |
-| Print time | ~20–28 h |
-| Material | ~380–450 g PETG |
+| Print time | 7–12 h, depending on printer and settings |
+| Material | ~350 g PETG |
 | Supports | None |
 | Bed needed | 256 × 256 mm or larger |
 | Status | Printed and in classroom use |
@@ -35,8 +35,8 @@ STL and STEP versions are alongside them in
 
 Everything is driven by a parameter dict at the top of
 [`freecad/build_caddy.py`](freecad/build_caddy.py) — marker diameter, board
-count and thickness, eraser dimensions, number of boxes, whether to include
-name plates. Change a number, re-run, and every output file rebuilds.
+count and thickness, eraser dimensions, number of boxes. Change a number,
+re-run, and every output file rebuilds.
 
 **[Full documentation, tolerances, and design notes →](freecad/README.md)**
 

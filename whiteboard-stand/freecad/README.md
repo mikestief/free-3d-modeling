@@ -1,7 +1,7 @@
 # Whiteboard Caddy — build and design notes
 
 Classroom desk caddy holding **8 lap boards, 10 markers, 16 eraser pads** in
-two boxes, with an arched carry handle and optional swappable name plates.
+two boxes, with an arched carry handle.
 
 Generated parametrically by [`build_caddy.py`](build_caddy.py) in FreeCAD.
 Printed and in classroom use. Licensed MIT — see [LICENSE](../../LICENSE);
@@ -67,11 +67,16 @@ The numbers most likely to be wrong for you, all near the top of `PARAMS`:
 | Different eraser pads | `pad_w` / `pad_d` / `pad_t` (50 × 50 × 8) |
 | One eraser box, or three | `n_bays` (2), `pads_per_bay` (8) |
 | Want the board divider ribs | `board_dividers` → `True` |
-| Want name plates | `nameplate` → `True`, then `school_name` / `teacher_name` |
+| Want name plates | `nameplate` → `True`, then `school_name` / `teacher_name` (see below) |
 | Smaller printer | `bed_x` / `bed_y` / `bed_z`, then check the bed-fit line |
 
-Name plates need a bold TTF; the script finds one automatically on macOS,
-Windows and Linux, or set `FONT_OVERRIDE` to a specific `.ttf` path.
+**Name plates are an optional extra that the built caddy does not use.** The
+generator still supports them — a pair of dovetailed, slide-in plates with
+raised two-colour lettering, carried on a tilted plinth across the front. The
+geometry is verified on every run, but it has never been printed, so treat it
+as untested. Enabling it makes the caddy 10 mm deeper. Plates need a bold TTF;
+the script finds one automatically on macOS, Windows and Linux, or set
+`FONT_OVERRIDE` to a specific `.ttf` path.
 
 The generator refuses to produce impossible geometry — asking for 11 markers
 raises a `ValueError` rather than silently merging the tube bores together.
@@ -90,7 +95,6 @@ raises a `ValueError` rather than silently merging the tube bores together.
 | Marker pitch | 22.56 mm — squeezed to fit; 2.56 mm of material between bores |
 | Erasers | **2 boxes**, 8 pads each = 16 pads (50 × 50 × 8 mm) |
 | Box size | 58 × 58 × 73 mm each, side by side, centred |
-| Name plates | none (`nameplate: False`) |
 | Handle | 80 mm arched cutout in the back wall |
 
 ---
@@ -135,7 +139,21 @@ used, not a live driver — edit `PARAMS` in the script and re-run.
 | Supports | **None** — print flat on the base as oriented |
 | Brim | Not required on textured PEI |
 
-Roughly **380–450 g** and **20–28 h**.
+### Reference slice
+
+Bambu Studio, Bambu Lab X2D, PETG, 0.4 mm nozzle, at the settings above:
+
+| | |
+|---|---|
+| Filament | **347.54 g** — 115.59 m |
+| Model printing time | 11 h 21 m |
+| Total time | **11 h 27 m** |
+| Filament changes | 0 |
+| Cost estimate | 6.25, at the price set in the filament profile |
+
+Expect **7–12 h** and **~350 g** across printers and profiles. Time moves a lot
+with layer height, speed profile and machine; filament barely moves at all,
+since it is set by the geometry.
 
 ---
 
@@ -207,9 +225,9 @@ exported file through an STL repair service.
 - **The underside is flat.** Recessed pads for stick-on feet were tried and
   removed — each 30 mm recess is a 30 mm unsupported ceiling on the first
   layer. Stick felt pads directly to the flat bottom.
-- **Name plates are dovetailed, not square-lipped.** Square retaining lips
-  meant the upper lip printed as a long unsupported ledge in mid-air. The
-  flared section retains just as well and self-supports.
+- **Name plates, when enabled, are dovetailed rather than square-lipped.**
+  Square retaining lips meant the upper lip printed as a long unsupported
+  ledge in mid-air. The flared section retains just as well and self-supports.
 
 ---
 
