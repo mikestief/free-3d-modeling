@@ -3,13 +3,16 @@
 Classroom whiteboard caddy - parametric generator for FreeCAD.
 
 Builds a desk caddy that holds small lap whiteboards, dry-erase markers and
-eraser pads, plus an optional pair of swappable two-colour name plates.
+eraser pads.
 
-As shipped it is configured for:
+As shipped - this is the configuration that was actually printed:
   - 8 x 9"x12" lap boards, leaning back 10 deg in an open channel
   - 10 x Expo chisel markers, cap-up, in a merged row of tubes
   - 16 x 50x50x8mm eraser pads, in two open-front boxes
-  - name plates disabled
+
+An optional pair of swappable two-colour name plates can be switched on with
+PARAMS["nameplate"]. The geometry is checked on every run but has never been
+printed, so treat that path as untested.
 
 Everything is driven by the PARAMS dict below. Change a number, re-run, and
 the whole model rebuilds. The values are also written into a FreeCAD

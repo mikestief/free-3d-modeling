@@ -17,7 +17,7 @@ needed and nothing owed.
 
 | Model | What it is | Size | Print | Status |
 |---|---|---|---|---|
-| **[Whiteboard Caddy](whiteboard-stand/)** | Classroom desk caddy for lap whiteboards, markers and erasers | 244 × 159 × 94 mm | ~24 h · PETG · no supports | ✅ Printed and in use |
+| **[Whiteboard Caddy](whiteboard-stand/)** | Classroom desk caddy for lap whiteboards, markers and erasers | 244 × 159 × 94 mm | 7–12 h · PETG · no supports | ✅ Printed and in use |
 
 ---
 
@@ -28,7 +28,7 @@ needed and nothing owed.
 A caddy for a small-group classroom table. Lap whiteboards stand in a leaning
 channel at the back, dry-erase markers sit cap-up in a merged row of tubes, and
 eraser pads stack in open-front boxes. An arched cutout in the back wall is the
-carry handle. Optional swappable two-colour name plates.
+carry handle.
 
 Holds **8 lap boards** (9"×12"), **10 markers** and **16 eraser pads**. Prints
 in one piece, flat on its base, no supports.
@@ -60,7 +60,7 @@ Provided as-is, with no warranty — see [LICENSE](LICENSE).
 
 1. **Print the fit coupon first.** Every model here ships one — a small part
    carrying each critical dimension, so you spend 20 minutes finding out a
-   marker is 0.5 mm too tight instead of 24 hours.
+   marker is 0.5 mm too tight instead of a whole overnight print.
 2. If the coupon fits, print the real thing.
 3. If it doesn't, change one number in the script and re-run.
 
