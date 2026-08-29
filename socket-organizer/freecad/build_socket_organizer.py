@@ -80,6 +80,34 @@ PARAMS = {
     "bed_x": 256.0, "bed_y": 256.0,
 }
 
+LINEAR_DEFLECTION = 0.02
+ANGULAR_DEFLECTION = math.radians(5.0)
+
+# How far to push a piece that gets FUSED (not cut) onto the base past the
+# shared boundary, so the two solids have genuine volumetric overlap instead
+# of a zero-gap tangent touch. See make_post's docstring for why this
+# matters - OCC's fuse silently produces self-intersecting/non-manifold
+# results at exact tangency, invisible to isValid()/Solids-count checks.
+FUSE_EMBED = 0.1
+
+# Tolerance for treating a mesh "self-intersection" as real. MeshPart's
+# tessellation of a curved surface fused/tangent to a flat one (the post's
+# chamfer-on-fillet corners; a curved font glyph's silhouette crossing the
+# base's sloped wall where the embossed label emerges from it) reliably
+# reports sub-chord-tolerance crossing segments - measured here at
+# 0.004-0.018mm, always inside LINEAR_DEFLECTION itself (0.02mm) - i.e.
+# noise from the tessellation's own approximation error at the seam between
+# two independently-meshed faces, not a real overlap. It reproduces across
+# a wide range of embed depth, font size, and mesh deflection settings, so
+# it is not something parameter-tuning the geometry can clear. A genuine
+# self-intersection - e.g. from a real boolean/geometry bug - crosses at
+# the scale of the feature involved (millimeters), far above this. Flagging
+# only past 2x the chord tolerance keeps real defects (like the pre-fix
+# dovetail-tail/post-base zero-gap tangent fuses this task found and fixed,
+# which produced actual non-manifold edges, not just tiny self-crossings)
+# caught while not failing the build on print-irrelevant tessellation noise.
+SELF_INTERSECT_TOL = 2 * LINEAR_DEFLECTION
+
 
 def _script_dir():
     try:
@@ -143,7 +171,19 @@ def make_base(p):
 
 def make_post(p, drive):
     """Square post, corners rounded, sized to the drive square (undersized
-    for friction). Centered in X, set back from the sloped front wall."""
+    for friction). Centered in X, set back from the sloped front wall.
+
+    The bottom face is pushed FUSE_EMBED below z=0 (extending the extrusion
+    height to compensate, so the top - where post_top_chamfer's edge lookup
+    keys off p["post_h"] - is untouched) before the final translate onto
+    the base's top (z=base_h). Without this, fusing the post onto the base
+    is a zero-gap tangent boolean (bottom face of post exactly coincident
+    with the base's top face over the post's whole footprint) - the same
+    OCC pathology documented in emboss_label's docstring, and it produced
+    real fallout here: fine_mesh flagged every one of the 42 generated
+    pieces as `mesh self-intersects` until this and make_dovetail_tail's
+    matching fix were added (caught by Task 8's watertight() check; prior
+    tasks only asserted isValid()/Solids-count, which this tangency passes)."""
     af = p["drive_af_nominal"][drive] - p["post_af_undersize"]
     r = p["post_corner_r"]
     cx, cy = p["base_w"] / 2.0, p["base_d"] * 0.62
@@ -152,8 +192,8 @@ def make_post(p, drive):
     for sx, sy in ((1, 1), (-1, 1), (-1, -1), (1, -1)):
         pts.append(App.Vector(cx + sx * half, cy + sy * half, 0))
     profile = Part.makePolygon(pts + [pts[0]])
-    face = Part.Face(profile)
-    post = face.extrude(App.Vector(0, 0, p["post_h"]))
+    face = Part.Face(profile).translate(App.Vector(0, 0, -FUSE_EMBED))
+    post = face.extrude(App.Vector(0, 0, p["post_h"] + FUSE_EMBED))
     post = post.makeFillet(r, [e for e in post.Edges
                                 if abs(e.Vertexes[0].Z - e.Vertexes[1].Z) > 0.01])
     if p["post_top_chamfer"] > 0:
@@ -168,26 +208,42 @@ def make_post(p, drive):
 # Geometry - vertical dovetail (open top, closed bottom)
 # --------------------------------------------------------------------------
 
-def _dt_profile(p, outward, clearance=0.0):
+def _dt_profile(p, outward, clearance=0.0, root_embed=0.0):
     """2D dovetail profile in the XY plane, tip pointing in +/-X (outward).
-    Root sits at x=0 (the base's side face), tip extends `dt_depth` out."""
+    Root sits at x=0 (the base's side face), tip extends `dt_depth` out.
+
+    `root_embed` pulls the root edge back by that much (in -sign*x, i.e.
+    further INTO the body the profile will be fused onto) without moving
+    the tip - see make_dovetail_tail for why."""
     neck = p["dt_neck_w"] / 2.0 + clearance
     tip = p["dt_tip_w"] / 2.0 + clearance
     depth = p["dt_depth"]
     sign = 1 if outward else -1
+    root_x = -sign * root_embed
     pts = [
-        App.Vector(0, -neck, 0),
+        App.Vector(root_x, -neck, 0),
         App.Vector(sign * depth, -tip, 0),
         App.Vector(sign * depth, tip, 0),
-        App.Vector(0, neck, 0),
-        App.Vector(0, -neck, 0),
+        App.Vector(root_x, neck, 0),
+        App.Vector(root_x, -neck, 0),
     ]
     return Part.Face(Part.makePolygon(pts))
 
 
 def make_dovetail_tail(p):
-    """Protrudes from the base's right (+X) side, full base height."""
-    face = _dt_profile(p, outward=True)
+    """Protrudes from the base's right (+X) side, full base height.
+
+    root_embed=FUSE_EMBED pushes the root face FUSE_EMBED past x=base_w
+    into the base's own solid before make_middle_piece/make_cap fuse this
+    onto the base, so the fuse has genuine volumetric overlap rather than a
+    zero-gap tangent touch at x=base_w (see make_post's docstring - this
+    was the other half of the same self-intersecting-mesh bug, and it hit
+    every piece including the caps, which showed `mesh NON-MANIFOLD`
+    instead of `mesh self-intersects` since they lack the post/label fuses
+    that pushed the middle pieces further into self-intersection). The
+    outward-facing tip position (what actually has to fit the neighbouring
+    piece's groove) is untouched."""
+    face = _dt_profile(p, outward=True, root_embed=FUSE_EMBED)
     solid = face.extrude(App.Vector(0, 0, p["base_h"]))
     return solid.translate(App.Vector(p["base_w"], p["base_d"] * 0.3, 0))
 
@@ -315,6 +371,24 @@ def make_cap(p, side):
     above the overlap is ~2445.8 mm3 and the cut actually removes ~1865.6
     mm3 of corner material, producing a rounded nose centered on the
     dovetail's Y offset (base_d * 0.3) rather than two square corners.
+
+    The corner box's far edge (the one away from round_x) is pulled in by
+    FUSE_EMBED, i.e. its width is cap_round_r - FUSE_EMBED rather than
+    exactly cap_round_r. Without that, the box's far edge sits at exactly
+    distance cap_round_r from the cylinder's own center - precisely on the
+    cylinder's surface - so at the one latitude where the cylinder reaches
+    its full radius (y = base_d*0.3, dead center) box and cylinder are
+    exactly tangent at a single point rather than genuinely overlapping.
+    Confirmed live: at that exact width, `corner.cut(round_cutter)` (and
+    the final cap after cutting it from body) silently splits into 2
+    disconnected Solids at that pinch point - both cap_start and cap_end
+    tessellated as `mesh NON-MANIFOLD; mesh not solid` until this was
+    caught by Task 8's watertight() check (no prior task asserted
+    Solids-count on the caps specifically, only on the dovetail coupon).
+    Pulling the far edge in by FUSE_EMBED keeps it strictly inside the
+    cylinder everywhere, so there's no leftover sliver at the pinch
+    latitude to disconnect - real, if imperceptible (0.1mm on an 8mm
+    radius), overlap instead of a zero-gap tangent touch.
     """
     if side not in ("start", "end"):
         raise ValueError("side must be 'start' or 'end', got %r" % side)
@@ -330,8 +404,9 @@ def make_cap(p, side):
         round_x = p["base_w"]
     round_cutter = Part.makeCylinder(
         r, p["base_h"] + 2, App.Vector(round_x, p["base_d"] * 0.3, -1))
-    corner_x = round_x if side == "start" else round_x - r
-    corner = box(r, p["base_d"], p["base_h"] + 2, corner_x, 0, -1)
+    corner_w = r - FUSE_EMBED
+    corner_x = round_x if side == "start" else round_x - corner_w
+    corner = box(corner_w, p["base_d"], p["base_h"] + 2, corner_x, 0, -1)
     body = body.cut(corner.cut(round_cutter))
     return body
 
@@ -375,6 +450,149 @@ def build_dovetail_coupon(p):
     return a.fuse(b)
 
 
+def fine_mesh(shape, linear=None):
+    import MeshPart
+    return MeshPart.meshFromShape(
+        Shape=shape,
+        LinearDeflection=LINEAR_DEFLECTION if linear is None else linear,
+        AngularDeflection=ANGULAR_DEFLECTION,
+        Relative=False)
+
+
+def overhangs(shape, limit_deg=45.0, z_tol=0.05, min_area=5.0, samples=7):
+    """Downward-facing surfaces, split by how much trouble they actually are.
+
+    Returns (flat, curved).
+
+    `flat` is planar ceilings - these are true bridges the printer must span
+    unsupported, and are what you actually want to design out.
+
+    `curved` is curved surfaces steeper than the limit somewhere on them, such
+    as the top of an arch or a round hole. One sample per face wrongly condemns
+    an entire arch, so curved faces are sampled on a grid and only the
+    offending fraction of the area is reported. These are progressively
+    supported and normally print fine.
+
+    Faces resting on the bed are excluded. Face.normalAt already accounts for
+    face orientation, so the result must NOT be flipped again - verified
+    against a control solid with a deliberate floating ledge.
+    """
+    flat, curved = [], []
+    zmin = shape.BoundBox.ZMin
+    thr = -math.cos(math.radians(limit_deg))
+    for f in shape.Faces:
+        bb = f.BoundBox
+        if abs(bb.ZMax - zmin) < z_tol or f.Area < min_area:
+            continue
+        try:
+            us, ue, vs, ve = f.ParameterRange
+        except Exception:
+            continue
+        if isinstance(f.Surface, Part.Plane):
+            try:
+                nz = f.normalAt((us + ue) / 2.0, (vs + ve) / 2.0).z
+            except Exception:
+                continue
+            if nz < thr:
+                flat.append((f.Area, bb.ZMin, bb.XLength, bb.YLength))
+        else:
+            bad = tot = 0
+            for i in range(samples):
+                for j in range(samples):
+                    u = us + (ue - us) * (i + 0.5) / samples
+                    v = vs + (ve - vs) * (j + 0.5) / samples
+                    try:
+                        nz = f.normalAt(u, v).z
+                    except Exception:
+                        continue
+                    tot += 1
+                    if nz < thr:
+                        bad += 1
+            if tot and bad:
+                est = f.Area * bad / float(tot)
+                if est >= min_area:
+                    curved.append((est, bb.ZMin, bb.XLength, bb.YLength))
+    flat.sort(key=lambda r: -r[0])
+    curved.sort(key=lambda r: -r[0])
+    return flat, curved
+
+
+def watertight(shape, label):
+    """Report anything that would make a slicer refuse the mesh.
+
+    Shape.isValid() is not enough - it passes shapes whose faces
+    self-intersect. Shape.check() is what catches those, and the mesh itself
+    has to be tested separately because a valid solid can still tessellate
+    into non-manifold edges wherever two bodies touch tangentially.
+    """
+    notes = []
+    try:
+        shape.check(True)
+        brep_errs = 0
+    except Exception as exc:
+        brep_errs = str(exc).count("Error in")
+    if brep_errs:
+        notes.append("%d B-rep self-intersections" % brep_errs)
+    if not shape.isClosed():
+        notes.append("open shell")
+    m = fine_mesh(shape)
+    if m.hasNonManifolds():
+        notes.append("mesh NON-MANIFOLD")
+    if m.hasSelfIntersections():
+        # See SELF_INTERSECT_TOL: only escalate crossings big enough to be a
+        # real overlap, not sub-chord-tolerance tessellation noise.
+        worst = max((App.Vector(pt1) - App.Vector(pt2)).Length
+                     for _, _, pt1, pt2 in m.getSelfIntersections())
+        if worst > SELF_INTERSECT_TOL:
+            notes.append("mesh self-intersects (%.3fmm)" % worst)
+    if not m.isSolid():
+        notes.append("mesh not solid")
+    return "%s: %s" % (label, "watertight" if not notes else "; ".join(notes))
+
+
+# --------------------------------------------------------------------------
+# Self-checks
+# --------------------------------------------------------------------------
+
+def check_post_fit(shape, p, drive):
+    """Probe the drive-square broach hole itself (nominal size, not
+    undersized) onto the post. The post must NOT clear it with excess
+    volume beyond the intended interference band - a probe at nominal size
+    should show measurable overlap (that's the friction grip)."""
+    af = p["drive_af_nominal"][drive]
+    r = p["post_corner_r"]
+    cx, cy = p["base_w"] / 2.0, p["base_d"] * 0.62
+    half = af / 2.0 - r
+    pts = [App.Vector(cx + sx * half, cy + sy * half, p["base_h"] - 1)
+           for sx, sy in ((1, 1), (-1, 1), (-1, -1), (1, -1))]
+    probe = Part.Face(Part.makePolygon(pts + [pts[0]])).extrude(
+        App.Vector(0, 0, p["post_h"] + 2))
+    overlap = shape.common(probe).Volume
+    return overlap
+
+
+def check_structural(p):
+    """Minimum-thickness parameter check. Real thickness measurement needs
+    a full geometric kernel query; this asserts the *design* numbers stay
+    above safe minimums for FDM printing (repo convention: >=1.2mm walls,
+    >=2mm posts/tabs)."""
+    issues = []
+    dt_wall = p["dt_neck_w"] / 2.0
+    if dt_wall < 1.2:
+        issues.append("dovetail neck %.2fmm below 1.2mm minimum" % dt_wall)
+    if p["base_h"] < 2.0:
+        issues.append("base_h %.2fmm below 2.0mm minimum" % p["base_h"])
+    return issues
+
+
+def check_printability(shape, label):
+    flat, curved = overhangs(shape)
+    if flat:
+        return ["%s: %d unplanned flat overhang(s), largest %.1fmm2"
+                % (label, len(flat), flat[0][0])]
+    return []
+
+
 def run():
     doc = App.newDocument("socket_organizer")
     pieces = generate_all(PARAMS)
@@ -393,6 +611,41 @@ def run():
     # coupon geometry or a real print.
     assert len(coupon.Solids) == 1, "dovetail coupon halves did not fuse into one piece"
     print("dovetail coupon: 1 solid, volume %.1f mm3" % coupon.Volume)
+
+    print("\n--- self-check report ---")
+    struct_issues = check_structural(PARAMS)
+    for issue in struct_issues:
+        print("STRUCTURAL: %s" % issue)
+
+    printability_issues = []
+    mesh_issues = []
+    for name, shape in sorted(pieces.items()):
+        issues = check_printability(shape, name)
+        printability_issues.extend(issues)
+        for issue in issues:
+            print("PRINTABILITY: %s" % issue)
+        report = watertight(shape, name)
+        print(report)
+        if not report.endswith(": watertight"):
+            mesh_issues.append(report)
+
+    # Fit check: friction interference differs by drive (af_nominal 9.53mm
+    # vs 12.70mm with the same 0.5mm undersize applied to both), so probe one
+    # representative piece per drive rather than a single hand-picked size.
+    fit_results = {}
+    for drive, sample_name in (("1-2in", "metric_12mm_1-2in"),
+                                ("3-8in", "metric_12mm_3-8in")):
+        overlap = check_post_fit(pieces[sample_name], PARAMS, drive)
+        fit_results[sample_name] = overlap
+        print("post fit probe overlap (%s, drive %s): %.2f mm3"
+              % (sample_name, drive, overlap))
+        assert overlap > 0.5, (
+            "%s post shows no interference with nominal drive square (%s) "
+            "- too loose" % (sample_name, drive))
+
+    assert not struct_issues, "structural check failed, see report above"
+    assert not printability_issues, "printability check failed, see report above"
+    assert not mesh_issues, "mesh/watertight check failed, see report above"
 
     App.closeDocument(doc.Name)
 
