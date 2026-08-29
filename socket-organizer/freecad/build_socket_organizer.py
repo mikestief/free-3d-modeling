@@ -103,11 +103,62 @@ def sae_key(n32):
     return "%d-%din" % (n32 // g, d // g)
 
 
+# --------------------------------------------------------------------------
+# Geometry - base and post
+# --------------------------------------------------------------------------
+
+def make_base(p):
+    """Riser block with a sloped front wall. Front is the -Y face."""
+    body = box(p["base_w"], p["base_d"], p["base_h"], 0, 0, 0)
+    # Slope the front wall back by cutting a wedge from the top-front edge.
+    slope_rise = p["base_h"] * math.tan(math.radians(p["front_slope_deg"]))
+    wedge_pts = [
+        App.Vector(-1, -1, p["base_h"]),
+        App.Vector(-1, slope_rise, p["base_h"]),
+        App.Vector(-1, -1, p["base_h"] + 1),
+        App.Vector(-1, -1, p["base_h"]),
+    ]
+    wire = Part.makePolygon(wedge_pts)
+    face = Part.Face(wire)
+    wedge = face.extrude(App.Vector(p["base_w"] + 2, 0, 0))
+    return body.cut(wedge)
+
+
+def make_post(p, drive):
+    """Square post, corners rounded, sized to the drive square (undersized
+    for friction). Centered in X, set back from the sloped front wall."""
+    af = p["drive_af_nominal"][drive] - p["post_af_undersize"]
+    r = p["post_corner_r"]
+    cx, cy = p["base_w"] / 2.0, p["base_d"] * 0.62
+    half = af / 2.0 - r
+    pts = []
+    for sx, sy in ((1, 1), (-1, 1), (-1, -1), (1, -1)):
+        pts.append(App.Vector(cx + sx * half, cy + sy * half, 0))
+    profile = Part.makePolygon(pts + [pts[0]])
+    face = Part.Face(profile)
+    post = face.extrude(App.Vector(0, 0, p["post_h"]))
+    post = post.makeFillet(r, [e for e in post.Edges
+                                if abs(e.Vertexes[0].Z - e.Vertexes[1].Z) > 0.01])
+    if p["post_top_chamfer"] > 0:
+        top_edges = [e for e in post.Edges
+                     if abs(e.Vertexes[0].Z - p["post_h"]) < 0.01
+                     and abs(e.Vertexes[1].Z - p["post_h"]) < 0.01]
+        post = post.makeChamfer(p["post_top_chamfer"], top_edges)
+    return post.translate(App.Vector(0, 0, p["base_h"]))
+
+
+def make_middle_piece(p, drive):
+    return make_base(p).fuse(make_post(p, drive))
+
+
 def run():
     doc = App.newDocument("socket_organizer")
-    print("socket-organizer: skeleton OK, %d metric + %d SAE sizes x %d drives"
-          % (len(PARAMS["metric_mm"]), len(PARAMS["sae_frac_32nds"]),
-             len(PARAMS["drives"])))
+    piece = make_middle_piece(PARAMS, "1-2in")
+    bb = piece.Shape.BoundBox if hasattr(piece, "Shape") else piece.BoundBox
+    print("test piece bbox: %.2f x %.2f x %.2f, volume %.1f"
+          % (bb.XLength, bb.YLength, bb.ZLength, piece.Volume))
+    assert bb.ZLength > PARAMS["base_h"] + PARAMS["post_h"] - 0.5
+    assert bb.XLength <= PARAMS["base_w"] + 0.01
     App.closeDocument(doc.Name)
 
 
