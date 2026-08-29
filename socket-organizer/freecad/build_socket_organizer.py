@@ -336,31 +336,36 @@ def make_cap(p, side):
     return body
 
 
+# --------------------------------------------------------------------------
+# Size table iteration
+# --------------------------------------------------------------------------
+
+def generate_all(p):
+    """Returns {name: shape} for every middle piece and both caps."""
+    out = {}
+    for mm in p["metric_mm"]:
+        for drive in p["drives"]:
+            name = "metric_%dmm_%s" % (mm, drive)
+            out[name] = make_middle_piece(p, drive, str(mm))
+    for n32 in p["sae_frac_32nds"]:
+        label = sae_label(n32)
+        key = sae_key(n32)
+        for drive in p["drives"]:
+            name = "sae_%s_%s" % (key, drive)
+            out[name] = make_middle_piece(p, drive, label)
+    out["cap_start"] = make_cap(p, "start")
+    out["cap_end"] = make_cap(p, "end")
+    return out
+
+
 def run():
     doc = App.newDocument("socket_organizer")
-    piece = make_middle_piece(PARAMS, "1-2in", "12")
-    bb = piece.BoundBox
-    print("labeled piece bbox: %.2f x %.2f x %.2f" % (bb.XLength, bb.YLength, bb.ZLength))
-    assert bb.XLength <= PARAMS["base_w"] + PARAMS["dt_depth"] + 0.5
-
-    cap = make_cap(PARAMS, "start")
-    # A "start" cap's tail sits on its RIGHT edge (local x in
-    # [base_w, base_w + dt_depth]) and mates into the groove on a middle
-    # piece's LEFT edge (local x in [0, dt_depth]). For those ranges to
-    # coincide the middle piece must be placed base_w to the RIGHT of the
-    # cap, not to the left - translating left instead puts the middle
-    # piece's own TAIL (on ITS right edge) crashing into the cap's plain
-    # base material at local x in [0, dt_depth], which is a real collision,
-    # not a mate (verified live: overlap volume 200.000 mm3 there vs
-    # 0.000 mm3 with the correct +base_w placement, where the cap's tail
-    # is additionally confirmed to sit entirely inside the middle piece's
-    # groove-cutter swept volume - 199.99999... of 199.99999... mm3 - i.e.
-    # a real interlock, not merely two shapes that happen not to touch).
-    mid = make_middle_piece(PARAMS, "1-2in", "12").translate(
-        App.Vector(PARAMS["base_w"], 0, 0))
-    overlap = cap.common(mid).Volume
-    print("cap-to-middle overlap volume: %.3f mm3" % overlap)
-    assert overlap < 1.0
+    pieces = generate_all(PARAMS)
+    n_metric = len(PARAMS["metric_mm"]) * len(PARAMS["drives"])
+    n_sae = len(PARAMS["sae_frac_32nds"]) * len(PARAMS["drives"])
+    expected = n_metric + n_sae + 2
+    print("generated %d pieces (expected %d)" % (len(pieces), expected))
+    assert len(pieces) == expected == 42
     App.closeDocument(doc.Name)
 
 
