@@ -99,13 +99,30 @@ FUSE_EMBED = 0.1
 # noise from the tessellation's own approximation error at the seam between
 # two independently-meshed faces, not a real overlap. It reproduces across
 # a wide range of embed depth, font size, and mesh deflection settings, so
-# it is not something parameter-tuning the geometry can clear. A genuine
-# self-intersection - e.g. from a real boolean/geometry bug - crosses at
-# the scale of the feature involved (millimeters), far above this. Flagging
-# only past 2x the chord tolerance keeps real defects (like the pre-fix
-# dovetail-tail/post-base zero-gap tangent fuses this task found and fixed,
-# which produced actual non-manifold edges, not just tiny self-crossings)
-# caught while not failing the build on print-irrelevant tessellation noise.
+# it is not something parameter-tuning the geometry can clear.
+#
+# IMPORTANT - what this tolerance does NOT catch: the zero-gap-tangent-fuse
+# defect class (FUSE_EMBED reverted to 0 on make_post/make_dovetail_tail)
+# measures only ~0.014mm worst self-intersection distance for a middle
+# piece (~0.0044mm for an isolated post+base fuse alone) - inside this
+# tolerance's range and overlapping the noise band above, not "at the
+# scale of the feature involved (millimeters)" as an earlier version of
+# this comment claimed. That claim was wrong: verified live, distance-based
+# filtering cannot reliably separate that defect from ordinary tessellation
+# noise, because their measured ranges overlap. 40 of 42 pieces (every
+# middle piece) would silently pass watertight() with FUSE_EMBED=0; only
+# the 2 caps still fail, and only via a different, tolerance-independent
+# check (NON-MANIFOLD/not-solid) that happens to catch the caps' specific
+# failure shape, not the middle pieces'.
+#
+# The zero-gap-fuse defect is instead caught directly, before any fuse or
+# mesh is involved, by check_fuse_overlap() and check_cap_corner_solid()
+# (see "Fuse-overlap self-checks" below) - exact OCC B-rep volume/topology
+# facts, not a downstream mesh-tessellation proxy. This tolerance's only
+# remaining job is filtering genuine tessellation noise (the curved-surface
+# seams described above) out of the mesh self-intersection check so it
+# doesn't cry wolf on every build; it is not a defense against zero-gap
+# fuses of any kind.
 SELF_INTERSECT_TOL = 2 * LINEAR_DEFLECTION
 
 
@@ -182,8 +199,14 @@ def make_post(p, drive):
     OCC pathology documented in emboss_label's docstring, and it produced
     real fallout here: fine_mesh flagged every one of the 42 generated
     pieces as `mesh self-intersects` until this and make_dovetail_tail's
-    matching fix were added (caught by Task 8's watertight() check; prior
-    tasks only asserted isValid()/Solids-count, which this tangency passes)."""
+    matching fix were added. NOTE: that mesh self-intersection distance is
+    NOT a reliable way to catch this defect - reverting FUSE_EMBED to 0
+    only pushes the measured self-intersection to ~0.0044mm (isolated
+    post+base) / ~0.014mm (full middle piece), inside SELF_INTERSECT_TOL's
+    noise-filtering range, so watertight() would silently pass it. The
+    check that actually catches a zero-gap post/base fuse is
+    check_fuse_overlap()'s direct base.common(post).Volume assertion (see
+    "Fuse-overlap self-checks"), which needs no mesh at all."""
     af = p["drive_af_nominal"][drive] - p["post_af_undersize"]
     r = p["post_corner_r"]
     cx, cy = p["base_w"] / 2.0, p["base_d"] * 0.62
@@ -240,9 +263,12 @@ def make_dovetail_tail(p):
     was the other half of the same self-intersecting-mesh bug, and it hit
     every piece including the caps, which showed `mesh NON-MANIFOLD`
     instead of `mesh self-intersects` since they lack the post/label fuses
-    that pushed the middle pieces further into self-intersection). The
-    outward-facing tip position (what actually has to fit the neighbouring
-    piece's groove) is untouched."""
+    that pushed the middle pieces further into self-intersection). As with
+    make_post, mesh self-intersection distance alone cannot be trusted to
+    catch a reverted FUSE_EMBED here - see check_fuse_overlap(), which
+    asserts base.common(tail).Volume > 0 directly. The outward-facing tip
+    position (what actually has to fit the neighbouring piece's groove) is
+    untouched."""
     face = _dt_profile(p, outward=True, root_embed=FUSE_EMBED)
     solid = face.extrude(App.Vector(0, 0, p["base_h"]))
     return solid.translate(App.Vector(p["base_w"], p["base_d"] * 0.3, 0))
@@ -389,6 +415,14 @@ def make_cap(p, side):
     cylinder everywhere, so there's no leftover sliver at the pinch
     latitude to disconnect - real, if imperceptible (0.1mm on an 8mm
     radius), overlap instead of a zero-gap tangent touch.
+
+    Unlike the post/tail fuses, this defect happens to still get caught by
+    watertight() at FUSE_EMBED=0 (the caps have no post/label fuses ahead
+    of it to mask the resulting NON-MANIFOLD mesh) - but that is incidental
+    to this cut's specific topology, not something to rely on in general;
+    see SELF_INTERSECT_TOL's docstring. check_cap_corner_solid() below
+    checks the same thing directly, via raw B-rep Solids count on the
+    finished cap body, with no meshing involved.
     """
     if side not in ("start", "end"):
         raise ValueError("side must be 'start' or 'end', got %r" % side)
@@ -524,6 +558,19 @@ def watertight(shape, label):
     self-intersect. Shape.check() is what catches those, and the mesh itself
     has to be tested separately because a valid solid can still tessellate
     into non-manifold edges wherever two bodies touch tangentially.
+
+    What this does NOT reliably catch: a zero-gap tangent fuse (e.g.
+    FUSE_EMBED reverted to 0 on make_post/make_dovetail_tail). That defect's
+    mesh self-intersection distance (~0.004-0.014mm, measured live) sits
+    inside SELF_INTERSECT_TOL's tessellation-noise-filtering range for 40 of
+    42 pieces (every middle piece) - only the 2 caps happen to still fail
+    here, and via the tolerance-independent NON-MANIFOLD/not-solid checks,
+    not the distance one. Mesh-tessellation signals are a downstream proxy
+    for geometry, not a geometric fact, and this defect class sits right in
+    the gap between "real crossing" and "tessellation noise" where that
+    proxy can't tell the two apart. See check_fuse_overlap() and
+    check_cap_corner_solid() for the direct, tessellation-independent checks
+    that do catch it.
     """
     notes = []
     try:
@@ -593,6 +640,86 @@ def check_printability(shape, label):
     return []
 
 
+def check_fuse_overlap(base, part, label):
+    """Direct geometric guarantee that `part` (a piece meant to fuse INTO
+    `base`, relying on FUSE_EMBED for genuine overlap - e.g. make_post or
+    make_dovetail_tail) actually has positive volumetric overlap with
+    `base` BEFORE the fuse happens.
+
+    This is deliberately NOT a mesh-tessellation proxy. base.common(part)
+    is OCC's own exact B-rep boolean intersection - there is no meshing,
+    no chord tolerance, nothing for tessellation noise to hide in or be
+    confused with. A zero-gap tangent touch (FUSE_EMBED <= 0) has exactly
+    zero shared volume; only a genuine embed does not. This is what
+    catches the class of defect that watertight()'s SELF_INTERSECT_TOL
+    cannot (see its docstring): the ~0.004-0.014mm self-intersection this
+    defect produces sits inside that tolerance's noise-filtering range for
+    every middle piece, so distance-based mesh filtering alone silently
+    passes it."""
+    overlap = base.common(part).Volume
+    if overlap <= 0.0:
+        return ("%s: no volumetric overlap before fuse (%.4f mm3) - "
+                "zero-gap tangent fuse, not a real embed" % (label, overlap))
+    return None
+
+
+def check_cap_corner_solid(p, side):
+    """Direct topological guarantee for make_cap's corner-rounding cut,
+    which relies on FUSE_EMBED to keep the corner box strictly inside the
+    round cylinder everywhere except at round_x (see make_cap's
+    docstring). At FUSE_EMBED <= 0 the box's far edge sits exactly tangent
+    to the cylinder at the dead-center latitude, and cutting the rounded
+    corner sliver out of the cap body silently splits the whole cap into 2
+    disconnected Solids there instead of raising an error - confirmed live:
+    building the actual cap at FUSE_EMBED=0 gives Solids count 2 (both
+    sides); at the real FUSE_EMBED=0.1 it is 1 for both.
+
+    NOTE: corner.cut(round_cutter) alone (the intermediate rounding
+    sliver) is NOT the right thing to check - it is naturally 2
+    disconnected pieces (the box's near and far corners, split by the arc
+    where the box is inside the cylinder) at every FUSE_EMBED value,
+    including the correct 0.1, so its Solids count doesn't distinguish
+    the defect. It's only once that sliver is cut out of the full,
+    otherwise-connected cap body that a genuine embed keeps the body in
+    one piece while a zero-gap tangent splits it - so this check builds
+    the real cap and inspects its own Solids count, which is a direct
+    fact from OCC's boolean kernel's own topology, no meshing, no
+    distance tolerance, so there is nothing here for tessellation noise
+    to be confused with."""
+    cap = make_cap(p, side)
+    n_solids = len(cap.Solids)
+    if n_solids != 1:
+        return ("cap_%s: %d disconnected solids (expected 1) - zero-gap "
+                "tangent at the corner rounding cut" % (side, n_solids))
+    return None
+
+
+def check_fuse_overlaps(p):
+    """Runs check_fuse_overlap()/check_cap_corner_solid() across every
+    FUSE_EMBED-dependent boolean in the design. make_post and
+    make_dovetail_tail's geometry does not depend on socket size (only
+    drive, or nothing at all), so one check per drive plus one for the
+    tail covers every one of the 40 middle pieces - they all build the
+    same post/tail geometry that these checks exercise directly. Both caps
+    are checked individually since 'start' and 'end' cut opposite edges."""
+    issues = []
+    base_shape = make_base(p)
+    for drive in p["drives"]:
+        issue = check_fuse_overlap(base_shape, make_post(p, drive),
+                                    "post/base fuse (%s)" % drive)
+        if issue:
+            issues.append(issue)
+    issue = check_fuse_overlap(base_shape, make_dovetail_tail(p),
+                                "dovetail tail/base fuse")
+    if issue:
+        issues.append(issue)
+    for side in ("start", "end"):
+        issue = check_cap_corner_solid(p, side)
+        if issue:
+            issues.append(issue)
+    return issues
+
+
 def run():
     doc = App.newDocument("socket_organizer")
     pieces = generate_all(PARAMS)
@@ -616,6 +743,16 @@ def run():
     struct_issues = check_structural(PARAMS)
     for issue in struct_issues:
         print("STRUCTURAL: %s" % issue)
+
+    print("\n--- fuse-overlap self-checks (direct B-rep, no meshing) ---")
+    fuse_issues = check_fuse_overlaps(PARAMS)
+    if fuse_issues:
+        for issue in fuse_issues:
+            print("FUSE-OVERLAP: %s" % issue)
+    else:
+        print("all FUSE_EMBED-dependent fuses have genuine volumetric "
+              "overlap (post/base x%d drives, dovetail tail/base, "
+              "cap corner cuts x2)" % len(PARAMS["drives"]))
 
     printability_issues = []
     mesh_issues = []
@@ -644,6 +781,7 @@ def run():
             "- too loose" % (sample_name, drive))
 
     assert not struct_issues, "structural check failed, see report above"
+    assert not fuse_issues, "fuse-overlap check failed, see report above"
     assert not printability_issues, "printability check failed, see report above"
     assert not mesh_issues, "mesh/watertight check failed, see report above"
 
