@@ -111,5 +111,22 @@ def run():
     App.closeDocument(doc.Name)
 
 
-if __name__ == "__main__" or "freecadcmd" in sys.argv[0].lower():
+def _invoked_as_script():
+    """True when this file was handed to freecadcmd / python as the script.
+
+    freecadcmd sets __name__ to the module's basename rather than
+    "__main__", so the usual guard never fires. Checking argv distinguishes
+    `freecadcmd build_socket_organizer.py` from `import build_socket_organizer`
+    in the console, which must NOT trigger a build on import.
+    """
+    if __name__ == "__main__":
+        return True
+    try:
+        me = os.path.basename(__file__)
+    except NameError:
+        return False
+    return any(os.path.basename(a) == me for a in sys.argv[1:])
+
+
+if _invoked_as_script():
     run()
