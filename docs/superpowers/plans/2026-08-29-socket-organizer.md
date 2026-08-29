@@ -725,6 +725,24 @@ git add socket-organizer/freecad/build_socket_organizer.py
 git commit -m "socket-organizer: fit, structural, printability and mesh checks"
 ```
 
+**Post-implementation note:** the sample code above is a simplification of
+what actually shipped (commits `a092fb3`, `29fc71e`). Running the full
+42-piece checks for real surfaced three more geometry bugs beyond this
+task's literal sample: (1) `make_post`/`make_dovetail_tail` fused onto
+`make_base` at exact zero-gap tangency, which OCC tessellates as
+non-manifold - fixed with a `FUSE_EMBED = 0.1` constant giving genuine
+volumetric overlap before each such fuse; (2) `make_cap`'s corner-rounding
+cut split the finished cap into 2 disconnected solids for the same
+zero-gap-tangency reason - fixed by shrinking the corner box by
+`FUSE_EMBED`; (3) a first-pass mesh self-intersection tolerance
+(`SELF_INTERSECT_TOL`) meant to separate real defects from tessellation
+noise turned out unable to do so reliably (the real defect's signal
+overlapped the noise range) - replaced with `check_fuse_overlap`/
+`check_cap_corner_solid`, direct B-rep boolean checks (`common().Volume`,
+`Solids` count) that don't depend on mesh tessellation at all. See the
+current file for the real implementation; treat this task's code block as
+historical context, not ground truth.
+
 ---
 
 ### Task 9: Exports and build report
