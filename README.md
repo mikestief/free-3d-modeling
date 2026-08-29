@@ -18,6 +18,7 @@ needed and nothing owed.
 | Model | What it is | Size | Print | Status |
 |---|---|---|---|---|
 | **[Whiteboard Caddy](whiteboard-stand/)** | Classroom desk caddy for lap whiteboards, markers and erasers | 244 × 159 × 94 mm | 7–12 h · ~350 g PETG · no supports | ✅ Printed and in use |
+| **[Whiteboard Caddy (3-eraser)](whiteboard-stand-3-eraser/)** | Variant with a third eraser bay and no carry handle | 244 × 159 × 94 mm | 7–12 h · ~380 g PETG · no supports | 🧪 Generated and checked, not yet printed |
 
 ---
 
@@ -34,6 +35,20 @@ Holds **8 lap boards** (9"×12"), **10 markers** and **16 eraser pads**. Prints
 in one piece, flat on its base, no supports.
 
 [Details and print files →](whiteboard-stand/README.md)
+
+---
+
+### [Whiteboard Caddy (3-eraser)](whiteboard-stand-3-eraser/)
+
+<img src="whiteboard-stand-3-eraser/images/whiteboard-caddy.png" alt="Whiteboard caddy, 3-eraser variant" width="560">
+
+Same caddy, two changes: a third eraser bay was added, and the carry handle
+was removed.
+
+Holds **8 lap boards** (9"×12"), **10 markers** and **24 eraser pads** in
+**3 boxes**. Prints in one piece, flat on its base, no supports.
+
+[Details and print files →](whiteboard-stand-3-eraser/README.md)
 
 ---
 
