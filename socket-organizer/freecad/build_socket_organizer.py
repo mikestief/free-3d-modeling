@@ -67,7 +67,31 @@ PARAMS = {
     "label_depth":     0.6,   # how far the text stands proud
     "label_z":         4.0,   # text baseline height on the sloped front wall
     "label_embed":     0.2,   # back-face push past the wall plane, capped by
-                               # label_depth - see emboss_label docstring
+                               # label_depth - see emboss_label docstring.
+                               # ONLY for the fused single-color path
+                               # (make_middle_piece's body.fuse(label)) -
+                               # OCC's fuse() needs real volumetric overlap
+                               # at the seam or it produces invalid,
+                               # non-manifold geometry at exact tangency.
+    "label_embed_multicolor": 0.03,  # back-face push used for the UNFUSED
+                               # multi-color 3MF export (export_multicolor_3mf)
+                               # instead of label_embed. Body and label stay
+                               # two separate solids/meshes there - nothing
+                               # is booleaned, so none of label_embed's 0.2mm
+                               # OCC-fuse-validity margin is needed. But
+                               # label_embed's full 0.2mm WAS still being
+                               # used on this path too, which put ~0.2mm of
+                               # literally-overlapping volume, assigned to
+                               # two different filaments, along the entire
+                               # label outline - confirmed (real test print,
+                               # Bambu Studio slice preview) to show up as a
+                               # visible white seam traced exactly around
+                               # the label text. This value only needs to be
+                               # large enough that the label doesn't render
+                               # as floating/gapped off the wall in a
+                               # slicer/mesh viewer - see run()'s multicolor
+                               # overlap spot-check for measured overlap
+                               # volumes at this depth.
 
     # --- cap (start/end piece) ----------------------------------------------
     "cap_round_r":     8.0,   # radius of the closed rounded end
@@ -313,9 +337,21 @@ def text_solid(txt, font, size, thickness):
     return comp.extrude(App.Vector(0, 0, thickness))
 
 
-def emboss_label(p, text):
+def emboss_label(p, text, embed=None):
     """Text solid, laid flat, rotated to sit on the sloped front wall,
     positioned centered in X, standing proud by label_depth.
+
+    `embed` overrides `p["label_embed"]` for the back-face push described
+    below (still capped by label_depth). Pass `p["label_embed_multicolor"]`
+    here when building the label for the UNFUSED multi-color 3MF export
+    (see export_multicolor_3mf / generate_all_parts_multicolor) - that path
+    never booleans body and label together, so it doesn't need label_embed's
+    larger OCC-fuse-validity margin, and using the full 0.2mm there puts
+    visibly-overlapping same-position volume under two different filament
+    assignments (confirmed via test print: a white seam traced around the
+    label outline in Bambu Studio's slice preview). Leave `embed` as None
+    (the default) for the fused single-color path (make_middle_piece), which
+    still needs the full label_embed margin - see below.
 
     make_base's front wall leans back in +Y as it rises: at height Z the
     wall surface sits at Y = wall_y_at_z(p, Z) (see make_base's wedge cut,
@@ -352,7 +388,8 @@ def emboss_label(p, text):
     label_depth standoff.
     """
     font = pick_font()
-    embed = min(p["label_embed"], p["label_depth"])
+    embed = p["label_embed"] if embed is None else embed
+    embed = min(embed, p["label_depth"])
     solid = text_solid(text, font, p["label_h"], p["label_depth"] + embed)
     solid = solid.translate(App.Vector(0, 0, -embed))
     bb = solid.BoundBox
@@ -364,7 +401,7 @@ def emboss_label(p, text):
     return solid
 
 
-def make_middle_piece_parts(p, drive, label_text):
+def make_middle_piece_parts(p, drive, label_text, label_embed=None):
     """(body_without_label, label_only) as two separate solids, in the
     exact same coordinate frame make_middle_piece fuses them in - i.e. no
     relative offset between the two. That's what makes the multi-color
@@ -376,11 +413,19 @@ def make_middle_piece_parts(p, drive, label_text):
     construction; make_middle_piece is just this plus a fuse, so the
     fused single-color piece (used for every self-check, fit coupon, and
     the plain combined export) and the split multi-color pair can never
-    drift apart."""
+    drift apart.
+
+    `label_embed` is forwarded to emboss_label as its `embed` override
+    (None, the default, means "use p['label_embed']" - see emboss_label).
+    Every caller that needs the fused single-color piece's label geometry
+    (make_middle_piece, generate_all_parts) must leave this as None.
+    generate_all_parts_multicolor is the one caller that passes
+    p['label_embed_multicolor'] instead, for the unfused multi-color 3MF
+    export, which doesn't need label_embed's OCC-fuse-validity margin."""
     body = make_base(p).fuse(make_post(p, drive))
     body = body.fuse(make_dovetail_tail(p))
     body = body.cut(make_dovetail_groove_cutter(p))
-    label = emboss_label(p, label_text)
+    label = emboss_label(p, label_text, embed=label_embed)
     return body, label
 
 
@@ -490,6 +535,38 @@ def generate_all_parts(p):
     multi-color _body/_label export pair."""
     return {name: make_middle_piece_parts(p, drive, label_text)
             for name, drive, label_text in _middle_piece_specs(p)}
+
+
+def generate_all_parts_multicolor(p, parts):
+    """Returns {name: (body_without_label, label_only)} for the 40 middle
+    pieces, for the UNFUSED multi-color 3MF export specifically
+    (export_multicolor_3mf's caller in run()) - NOT for the fused
+    single-color path, which must keep using generate_all_parts's
+    full-label_embed label unchanged.
+
+    Reuses each piece's `body` straight from `parts` (as returned by
+    generate_all_parts) rather than rebuilding the base/post/dovetail
+    geometry a second time - body doesn't depend on the label's embed
+    depth at all, only the label does. Only the label is rebuilt, via the
+    same emboss_label() used everywhere else, just with
+    p['label_embed_multicolor'] instead of p['label_embed'] - so the
+    label's shape/position math has exactly one implementation
+    (emboss_label) and the two export paths differ only in the one number
+    that needs to differ.
+
+    See emboss_label's `embed` parameter and PARAMS['label_embed_multicolor']
+    for why: label_embed's 0.2mm is sized for OCC fuse-validity
+    (make_middle_piece's body.fuse(label)), and reusing that same 0.2mm on
+    this unfused path put ~0.2mm of literally-overlapping body/label volume,
+    assigned to two different filaments, along the entire label outline -
+    confirmed via test print to produce a visible seam around the label in
+    Bambu Studio's slice preview."""
+    out = {}
+    for name, drive, label_text in _middle_piece_specs(p):
+        body, _unused_full_embed_label = parts[name]
+        label = emboss_label(p, label_text, embed=p["label_embed_multicolor"])
+        out[name] = (body, label)
+    return out
 
 
 def generate_all(p):
@@ -1038,7 +1115,34 @@ def run():
     # Multi-color export, combined 3MF: body + label as two objects in one
     # <name>_multicolor.3mf per middle piece - see export_multicolor_3mf's
     # docstring for why this needs Mesh.export() rather than Part.export().
-    multicolor_failures = export_multicolor_3mf(parts, out_dir)
+    #
+    # Uses multicolor_parts (label built with label_embed_multicolor), NOT
+    # `parts` (label built with the full label_embed) - `parts`' label
+    # geometry is only correct for the FUSED path (make_middle_piece's
+    # body.fuse(label), i.e. `pieces` and the plain combined/split-STEP/STL
+    # exports above). Reusing `parts` here would put ~0.2mm of literally
+    # overlapping body/label volume, assigned to two different filaments,
+    # along the whole label outline - see generate_all_parts_multicolor's
+    # docstring for the confirmed real-print seam artifact this caused.
+    multicolor_parts = generate_all_parts_multicolor(PARAMS, parts)
+
+    print("\n--- multi-color 3MF overlap spot-check (reduced embed) ---")
+    # Same two representative pieces as the part-reconstruction spot-check
+    # above, confirming the smaller label_embed_multicolor still leaves the
+    # label genuinely touching the body (not floating with a gap - a
+    # positive common() volume means real overlap) while being far smaller
+    # than the full-label_embed overlap reported above, which is what
+    # eliminates the seam without introducing a visible gap instead.
+    for name in ("metric_12mm_1-2in", "sae_5-16in_3-8in"):
+        mc_body, mc_label = multicolor_parts[name]
+        mc_overlap = mc_body.common(mc_label).Volume
+        print("%s: multicolor body/label overlap=%.6f mm3 (embed=%.3fmm)"
+              % (name, mc_overlap, PARAMS["label_embed_multicolor"]))
+        assert mc_overlap > 0.0, (
+            "%s: multicolor body/label have no overlap - label would not "
+            "attach" % name)
+
+    multicolor_failures = export_multicolor_3mf(multicolor_parts, out_dir)
     export_failures.extend(multicolor_failures)
 
     print("\n--- multi-color 3MF structure spot-check "
@@ -1077,7 +1181,8 @@ def run():
 
     print("\nExported %d pieces + %d body/label part-pairs + %d multicolor "
           "3MFs + %d coupons to %s"
-          % (len(pieces), len(split_shapes) // 2, len(parts) - len(multicolor_failures),
+          % (len(pieces), len(split_shapes) // 2,
+             len(multicolor_parts) - len(multicolor_failures),
              len(coupons), out_dir))
 
     # A partial export set must never silently look like success - but let
