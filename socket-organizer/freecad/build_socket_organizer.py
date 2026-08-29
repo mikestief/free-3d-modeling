@@ -363,12 +363,29 @@ def emboss_label(p, text):
     return solid
 
 
-def make_middle_piece(p, drive, label_text):
+def make_middle_piece_parts(p, drive, label_text):
+    """(body_without_label, label_only) as two separate solids, in the
+    exact same coordinate frame make_middle_piece fuses them in - i.e. no
+    relative offset between the two. That's what makes the multi-color
+    export work: a slicer that imports both files places them already
+    aligned, so assigning each a different filament/color reproduces the
+    single fused piece in two colors.
+
+    This is the single source of truth for the base/post/dovetail
+    construction; make_middle_piece is just this plus a fuse, so the
+    fused single-color piece (used for every self-check, fit coupon, and
+    the plain combined export) and the split multi-color pair can never
+    drift apart."""
     body = make_base(p).fuse(make_post(p, drive))
     body = body.fuse(make_dovetail_tail(p))
     body = body.cut(make_dovetail_groove_cutter(p))
-    body = body.fuse(emboss_label(p, label_text))
-    return body
+    label = emboss_label(p, label_text)
+    return body, label
+
+
+def make_middle_piece(p, drive, label_text):
+    body, label = make_middle_piece_parts(p, drive, label_text)
+    return body.fuse(label)
 
 
 # --------------------------------------------------------------------------
@@ -449,19 +466,44 @@ def make_cap(p, side):
 # Size table iteration
 # --------------------------------------------------------------------------
 
-def generate_all(p):
-    """Returns {name: shape} for every middle piece and both caps."""
-    out = {}
+def _middle_piece_specs(p):
+    """Yields (name, drive, label_text) for all 40 middle pieces (not the
+    2 caps, which have no label). Single source of truth for the
+    name/drive/label mapping, shared by generate_all_parts and (through
+    it) generate_all, so the two can't silently diverge on which pieces
+    exist or what they're named."""
     for mm in p["metric_mm"]:
         for drive in p["drives"]:
-            name = "metric_%dmm_%s" % (mm, drive)
-            out[name] = make_middle_piece(p, drive, str(mm))
+            yield "metric_%dmm_%s" % (mm, drive), drive, str(mm)
     for n32 in p["sae_frac_32nds"]:
         label = sae_label(n32)
         key = sae_key(n32)
         for drive in p["drives"]:
-            name = "sae_%s_%s" % (key, drive)
-            out[name] = make_middle_piece(p, drive, label)
+            yield "sae_%s_%s" % (key, drive), drive, label
+
+
+def generate_all_parts(p):
+    """Returns {name: (body_without_label, label_only)} for the 40 middle
+    pieces only - NOT the 2 caps, which never call emboss_label (see
+    make_cap) and so have nothing to split. This is the basis for the
+    multi-color _body/_label export pair."""
+    return {name: make_middle_piece_parts(p, drive, label_text)
+            for name, drive, label_text in _middle_piece_specs(p)}
+
+
+def generate_all(p):
+    """Returns {name: shape} for every middle piece and both caps - the
+    fused single-solid pieces used for every self-check, the fit coupons,
+    and the plain single-color export (all unchanged from before
+    multi-color support was added).
+
+    Built on top of generate_all_parts() rather than re-deriving each
+    piece's base/post/dovetail/label geometry, so a caller that needs both
+    the fused pieces and the split parts (see run()) can build the parts
+    once and fuse them locally instead of constructing every piece's
+    geometry twice."""
+    parts = generate_all_parts(p)
+    out = {name: body.fuse(label) for name, (body, label) in parts.items()}
     out["cap_start"] = make_cap(p, "start")
     out["cap_end"] = make_cap(p, "end")
     return out
@@ -771,12 +813,44 @@ def export_all(shapes, out_dir):
 
 def run():
     doc = App.newDocument("socket_organizer")
-    pieces = generate_all(PARAMS)
+    # Build the 40 middle pieces' (body, label) parts once, then derive the
+    # fused single-solid pieces from them locally (same as generate_all(p)
+    # does internally) instead of also calling generate_all_parts(p) again
+    # later for the multi-color export - that would rebuild every middle
+    # piece's base/post/dovetail/label geometry from scratch a second time.
+    parts = generate_all_parts(PARAMS)
+    pieces = {name: body.fuse(label) for name, (body, label) in parts.items()}
+    pieces["cap_start"] = make_cap(PARAMS, "start")
+    pieces["cap_end"] = make_cap(PARAMS, "end")
     n_metric = len(PARAMS["metric_mm"]) * len(PARAMS["drives"])
     n_sae = len(PARAMS["sae_frac_32nds"]) * len(PARAMS["drives"])
     expected = n_metric + n_sae + 2
     print("generated %d pieces (expected %d)" % (len(pieces), expected))
     assert len(pieces) == expected == 42
+
+    print("\n--- multi-color part-reconstruction spot-check ---")
+    # Confirms body_without_label U label_only reconstructs exactly the
+    # same fused solid used for every self-check/coupon/export above -
+    # i.e. splitting the piece into two files for multi-color printing
+    # doesn't silently change the geometry that gets printed. Also reports
+    # the intentional body/label embed overlap (see emboss_label's
+    # docstring) so it's visible this is the expected small embed, not an
+    # unbounded overlap.
+    for name in ("metric_12mm_1-2in", "sae_5-16in_3-8in"):
+        body, label = parts[name]
+        reconstructed_vol = body.fuse(label).Volume
+        fused_vol = pieces[name].Volume
+        embed_overlap = body.common(label).Volume
+        print("%s: fused=%.4f mm3, body+label refused=%.4f mm3 "
+              "(diff %.6f), body/label embed overlap=%.4f mm3"
+              % (name, fused_vol, reconstructed_vol,
+                 abs(fused_vol - reconstructed_vol), embed_overlap))
+        assert abs(fused_vol - reconstructed_vol) < 1e-6, (
+            "%s: body/label split does not reconstruct the fused piece"
+            % name)
+        assert embed_overlap > 0.0, (
+            "%s: body/label have no overlap - label would not attach"
+            % name)
 
     coupon = build_dovetail_coupon(PARAMS)
     # NOTE: this only proves the two halves fuse into one watertight solid
@@ -835,6 +909,20 @@ def run():
     out_dir = os.path.join(_script_dir(), "exports")
     export_failures = list(export_all(pieces, out_dir))
 
+    # Multi-color export: body and label as separate files per middle
+    # piece, IN ADDITION to the combined <name>.step/.stl/.3mf above (not
+    # a replacement - single-color printers still use the combined file).
+    # Both halves share the exact coordinate frame they were fused in
+    # (see make_middle_piece_parts), so importing both into a slicer's
+    # "multiple objects, same position" color-assignment workflow (Bambu
+    # Studio/OrcaSlicer/PrusaSlicer all support this) reproduces the fused
+    # piece with the label in a different filament.
+    split_shapes = {}
+    for name, (body, label) in parts.items():
+        split_shapes[name + "_body"] = body
+        split_shapes[name + "_label"] = label
+    export_failures.extend(export_all(split_shapes, out_dir))
+
     coupons = {
         "post_coupon_3-8in": build_post_coupon(PARAMS, "3-8in"),
         "post_coupon_1-2in": build_post_coupon(PARAMS, "1-2in"),
@@ -842,8 +930,8 @@ def run():
     }
     export_failures.extend(export_all(coupons, out_dir))
 
-    print("\nExported %d pieces + %d coupons to %s"
-          % (len(pieces), len(coupons), out_dir))
+    print("\nExported %d pieces + %d body/label part-pairs + %d coupons to %s"
+          % (len(pieces), len(split_shapes) // 2, len(coupons), out_dir))
 
     # A partial export set must never silently look like success - but let
     # every shape in both batches be attempted first (export_all already

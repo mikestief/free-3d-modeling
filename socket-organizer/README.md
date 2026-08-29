@@ -48,6 +48,26 @@ If a post is too loose or tight, adjust `post_af_undersize` in
 [`freecad/build_socket_organizer.py`](freecad/build_socket_organizer.py) and
 re-run. If the dovetail snap is too loose or tight, adjust `dt_clearance`.
 
+## Multi-color labels
+
+Every middle piece's size label (`10`, `5/16`, etc.) can be printed in a
+different filament color from the body on a multi-color printer (Bambu
+AMS, or any similar MMU/AMS setup). For each of the 40 middle pieces
+(not the 2 end caps, which have no label), `exports/` includes the label
+and the body as two separate files:
+
+- `<name>_body.stl` / `.step` / `.3mf` — the piece without its label
+- `<name>_label.stl` / `.step` / `.3mf` — just the embossed label
+
+Both are exported in the same coordinate frame they were modeled in, with
+no relative offset between them, so importing both into a slicer (Bambu
+Studio, OrcaSlicer, PrusaSlicer, or anything with a "multiple objects,
+same build-plate position" color-assignment workflow) places them already
+aligned — assign the body one filament and the label another, and slice.
+
+The plain `<name>.stl` / `.step` / `.3mf` files (the fused single-color
+piece) are unchanged and still there for single-color printing.
+
 ## Regenerating
 
 ```bash
