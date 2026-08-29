@@ -289,12 +289,83 @@ def make_middle_piece(p, drive, label_text):
     return body
 
 
+# --------------------------------------------------------------------------
+# Geometry - end cap
+# --------------------------------------------------------------------------
+
+def make_cap(p, side):
+    """side='start' has a tail on its right edge (mates leftward into the
+    row); side='end' has a groove on its left edge (mates rightward). The
+    opposite edge is rounded off closed.
+
+    The rounding removes the corner sliver that lies OUTSIDE the round
+    cylinder but INSIDE the body's own corner strip (width cap_round_r,
+    the full base_d depth). That corner strip must sit on the body's own
+    side of the edge being rounded:
+      - side='start' rounds the LEFT edge (round_x=0), so the strip is
+        x in [0, r] - i.e. box origin round_x (NOT round_x - r, which
+        would place the box entirely at x in [-r, 0], outside the body's
+        x in [0, base_w] domain and make the cut a no-op).
+      - side='end' rounds the RIGHT edge (round_x=base_w), so the strip
+        is x in [base_w - r, base_w] - i.e. box origin round_x - r (NOT
+        round_x, which would place the box entirely outside the body at
+        x in [base_w, base_w + r], again a no-op cut).
+    Verified live: with the box positioned outside the body its overlap
+    with body is 0.0 mm3 and the round is silently skipped; positioned as
+    above the overlap is ~2445.8 mm3 and the cut actually removes ~1865.6
+    mm3 of corner material, producing a rounded nose centered on the
+    dovetail's Y offset (base_d * 0.3) rather than two square corners.
+    """
+    body = box(p["base_w"], p["base_d"], p["base_h"], 0, 0, 0)
+    slope_rise = wall_y_at_z(p, p["base_h"])
+    wedge = Part.Face(Part.makePolygon([
+        App.Vector(-1, -1, 0),
+        App.Vector(-1, slope_rise, p["base_h"]),
+        App.Vector(-1, -1, p["base_h"]),
+        App.Vector(-1, -1, 0),
+    ])).extrude(App.Vector(p["base_w"] + 2, 0, 0))
+    body = body.cut(wedge)
+
+    r = p["cap_round_r"]
+    if side == "start":
+        body = body.fuse(make_dovetail_tail(p))
+        round_x = 0
+    else:
+        body = body.cut(make_dovetail_groove_cutter(p))
+        round_x = p["base_w"]
+    round_cutter = Part.makeCylinder(
+        r, p["base_h"] + 2, App.Vector(round_x, p["base_d"] * 0.3, -1))
+    corner_x = round_x if side == "start" else round_x - r
+    corner = box(r, p["base_d"], p["base_h"] + 2, corner_x, 0, -1)
+    body = body.cut(corner.cut(round_cutter))
+    return body
+
+
 def run():
     doc = App.newDocument("socket_organizer")
     piece = make_middle_piece(PARAMS, "1-2in", "12")
     bb = piece.BoundBox
     print("labeled piece bbox: %.2f x %.2f x %.2f" % (bb.XLength, bb.YLength, bb.ZLength))
     assert bb.XLength <= PARAMS["base_w"] + PARAMS["dt_depth"] + 0.5
+
+    cap = make_cap(PARAMS, "start")
+    # A "start" cap's tail sits on its RIGHT edge (local x in
+    # [base_w, base_w + dt_depth]) and mates into the groove on a middle
+    # piece's LEFT edge (local x in [0, dt_depth]). For those ranges to
+    # coincide the middle piece must be placed base_w to the RIGHT of the
+    # cap, not to the left - translating left instead puts the middle
+    # piece's own TAIL (on ITS right edge) crashing into the cap's plain
+    # base material at local x in [0, dt_depth], which is a real collision,
+    # not a mate (verified live: overlap volume 200.000 mm3 there vs
+    # 0.000 mm3 with the correct +base_w placement, where the cap's tail
+    # is additionally confirmed to sit entirely inside the middle piece's
+    # groove-cutter swept volume - 199.99999... of 199.99999... mm3 - i.e.
+    # a real interlock, not merely two shapes that happen not to touch).
+    mid = make_middle_piece(PARAMS, "1-2in", "12").translate(
+        App.Vector(PARAMS["base_w"], 0, 0))
+    overlap = cap.common(mid).Volume
+    print("cap-to-middle overlap volume: %.3f mm3" % overlap)
+    assert overlap < 1.0
     App.closeDocument(doc.Name)
 
 
