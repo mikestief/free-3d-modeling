@@ -449,21 +449,22 @@ def make_cap(p, side):
     row); side='end' has a groove on its left edge (mates rightward). The
     opposite edge is rounded off closed.
 
+    Reuses make_base(p) for the sloped-wall block rather than duplicating
+    the wedge-cut logic - a duplicated copy with near-vertices at y=-1
+    instead of y=0 shipped a bug where the slope angle itself was wrong
+    (not just the safety-margin extent), off by up to 0.75mm from
+    wall_y_at_z across the piece height, caught by live per-Z-height
+    comparison against wall_y_at_z.
+
     The rounding-corner box must overlap the SAME side of round_x as the
     body actually occupies (round_x for 'start' since the body spans
     [0, base_w] and the corner to round is at x=0; round_x - r for 'end'
     since the corner to round is at x=base_w) - the reverse placement was
     a shipped bug (0mm3 overlap, a silent no-op) caught by live volume
     verification."""
-    body = box(p["base_w"], p["base_d"], p["base_h"], 0, 0, 0)
-    slope_rise = wall_y_at_z(p, p["base_h"])
-    wedge = Part.Face(Part.makePolygon([
-        App.Vector(-1, -1, 0),
-        App.Vector(-1, slope_rise, p["base_h"]),
-        App.Vector(-1, -1, p["base_h"]),
-        App.Vector(-1, -1, 0),
-    ])).extrude(App.Vector(p["base_w"] + 2, 0, 0))
-    body = body.cut(wedge)
+    if side not in ("start", "end"):
+        raise ValueError("side must be 'start' or 'end', got %r" % side)
+    body = make_base(p)
 
     r = p["cap_round_r"]
     if side == "start":
