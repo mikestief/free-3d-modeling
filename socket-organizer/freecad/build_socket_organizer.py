@@ -92,6 +92,25 @@ PARAMS = {
                                # slicer/mesh viewer - see run()'s multicolor
                                # overlap spot-check for measured overlap
                                # volumes at this depth.
+                               #
+                               # Why not zero overlap (an exact shared
+                               # boundary) instead of a small deliberate
+                               # one? Because this file has already hit that
+                               # exact failure mode once - see FUSE_EMBED
+                               # above: OCC produces invalid/non-manifold
+                               # geometry at exact zero-gap tangency. A
+                               # zero-overlap split would need its own proof
+                               # that the UNFUSED export path (independently
+                               # tessellated body/label meshes, not a single
+                               # B-rep boolean) avoids that failure mode too,
+                               # which hasn't been established. A small,
+                               # measured, deliberate overlap is the
+                               # pragmatic choice given that history, even
+                               # though it's not a complete guarantee the
+                               # seam is imperceptible rather than merely
+                               # fainter - only confirmed by B-rep volume
+                               # reduction (~6.7x vs. label_embed's 0.2mm),
+                               # not yet by a repeat physical print.
 
     # --- cap (start/end piece) ----------------------------------------------
     "cap_round_r":     8.0,   # radius of the closed rounded end
@@ -1133,14 +1152,23 @@ def run():
     # positive common() volume means real overlap) while being far smaller
     # than the full-label_embed overlap reported above, which is what
     # eliminates the seam without introducing a visible gap instead.
+    # Floor is well above 0.0 (not just "not exactly zero") so a future edit
+    # that drops label_embed_multicolor to something numerically positive
+    # but physically negligible (e.g. 1e-4mm) still fails loudly here,
+    # rather than passing a `> 0.0` check while leaving no real attach
+    # margin. 0.01mm3 is comfortably below the smallest overlap measured at
+    # the current 0.03mm embed (~0.25mm3) with headroom to catch a real
+    # regression, not just float noise.
+    MC_OVERLAP_FLOOR = 0.01
     for name in ("metric_12mm_1-2in", "sae_5-16in_3-8in"):
         mc_body, mc_label = multicolor_parts[name]
         mc_overlap = mc_body.common(mc_label).Volume
         print("%s: multicolor body/label overlap=%.6f mm3 (embed=%.3fmm)"
               % (name, mc_overlap, PARAMS["label_embed_multicolor"]))
-        assert mc_overlap > 0.0, (
-            "%s: multicolor body/label have no overlap - label would not "
-            "attach" % name)
+        assert mc_overlap > MC_OVERLAP_FLOOR, (
+            "%s: multicolor body/label overlap %.6f mm3 is at or below the "
+            "%.6f mm3 floor - label would not attach or margin is "
+            "negligible" % (name, mc_overlap, MC_OVERLAP_FLOOR))
 
     multicolor_failures = export_multicolor_3mf(multicolor_parts, out_dir)
     export_failures.extend(multicolor_failures)
