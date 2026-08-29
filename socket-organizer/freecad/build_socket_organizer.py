@@ -30,6 +30,7 @@ import sys
 import math
 import FreeCAD as App
 import Part
+import Mesh
 
 # --------------------------------------------------------------------------
 # Parameters
@@ -770,13 +771,18 @@ def check_fuse_overlaps(p):
 # Export
 # --------------------------------------------------------------------------
 
-def export_all(shapes, out_dir):
-    """Export every shape to STEP/STL/3MF, reusing a single scratch document
-    for the whole batch (not one per shape - see the sibling
-    whiteboard-stand/freecad/build_caddy.py's export_all, which avoids a
-    temporary document per export for the same reason: creating/closing a
-    FreeCAD document 45 times is needless churn and keeps this off the GUI
-    thread).
+def export_all(shapes, out_dir, formats=("step", "stl", "3mf")):
+    """Export every shape to the given formats (default STEP/STL/3MF),
+    reusing a single scratch document for the whole batch (not one per shape
+    - see the sibling whiteboard-stand/freecad/build_caddy.py's export_all,
+    which avoids a temporary document per export for the same reason:
+    creating/closing a FreeCAD document 45 times is needless churn and keeps
+    this off the GUI thread).
+
+    `formats` lets a caller skip formats it doesn't need (e.g. the
+    _body/_label split export below only wants STEP+STL - the single-object
+    3MF for a body or label alone is redundant now that
+    export_multicolor_3mf() writes both as one combined multi-object 3MF).
 
     A failure exporting one shape (STEP write, recompute, or mesh write) is
     caught, logged, and does NOT abort the run - the loop still attempts
@@ -792,10 +798,14 @@ def export_all(shapes, out_dir):
                 obj = doc.addObject("Part::Feature", name)
                 obj.Shape = shape
                 doc.recompute()
-                Part.export([obj], os.path.join(out_dir, name + ".step"))
-                mesh = fine_mesh(shape)
-                mesh.write(os.path.join(out_dir, name + ".stl"))
-                mesh.write(os.path.join(out_dir, name + ".3mf"))
+                if "step" in formats:
+                    Part.export([obj], os.path.join(out_dir, name + ".step"))
+                if "stl" in formats or "3mf" in formats:
+                    mesh = fine_mesh(shape)
+                    if "stl" in formats:
+                        mesh.write(os.path.join(out_dir, name + ".stl"))
+                    if "3mf" in formats:
+                        mesh.write(os.path.join(out_dir, name + ".3mf"))
             except Exception as exc:
                 App.Console.PrintWarning(
                     "export failed for %r: %s\n" % (name, exc))
@@ -806,6 +816,59 @@ def export_all(shapes, out_dir):
                         doc.removeObject(name)
                     except Exception:
                         pass
+    finally:
+        App.closeDocument(doc.Name)
+    return failed
+
+
+def export_multicolor_3mf(parts, out_dir):
+    """Export each middle piece's body and label as TWO OBJECTS IN ONE 3MF
+    file (<name>_multicolor.3mf), so a multi-color slicer (Bambu
+    Studio/OrcaSlicer/PrusaSlicer) imports a single file and shows the body
+    and label as two independently-colorable objects at the same position -
+    assign each a different filament/AMS slot. This supersedes the 3MF half
+    of the _body/_label split export above for the multi-color use case (see
+    export_all's `formats` param, used to skip .3mf there).
+
+    Part.export()/Import.export() don't support .3mf in this FreeCAD build
+    (raises "Unknown extension") - only Mesh.export() does, and it accepts a
+    list of Mesh::Feature objects, writing each as its own <object>/<item>
+    entry in the 3MF's 3D/3dmodel.model, at identity transform since world
+    coordinates are already baked into the mesh vertices by fine_mesh().
+    Verified by unzipping a sample output and inspecting the raw XML - don't
+    re-verify by re-importing into FreeCAD, whose Mesh.insert() merges
+    multi-object 3MF back into a single Mesh::Feature on read (a
+    FreeCAD-reader-side simplification, not a sign the file is malformed).
+
+    Reuses a single scratch document for the whole batch, same reasoning as
+    export_all. A failure on one piece is caught, logged, and does not abort
+    the batch. Returns the list of piece names that failed."""
+    os.makedirs(out_dir, exist_ok=True)
+    failed = []
+    doc = App.newDocument("export_multicolor_tmp")
+    try:
+        for name, (body, label) in sorted(parts.items()):
+            body_name = name + "_body_mc"
+            label_name = name + "_label_mc"
+            try:
+                body_obj = doc.addObject("Mesh::Feature", body_name)
+                body_obj.Mesh = fine_mesh(body)
+                label_obj = doc.addObject("Mesh::Feature", label_name)
+                label_obj.Mesh = fine_mesh(label)
+                Mesh.export(
+                    [body_obj, label_obj],
+                    os.path.join(out_dir, name + "_multicolor.3mf"))
+            except Exception as exc:
+                App.Console.PrintWarning(
+                    "multicolor export failed for %r: %s\n" % (name, exc))
+                failed.append(name)
+            finally:
+                for obj_name in (body_name, label_name):
+                    if doc.getObject(obj_name) is not None:
+                        try:
+                            doc.removeObject(obj_name)
+                        except Exception:
+                            pass
     finally:
         App.closeDocument(doc.Name)
     return failed
@@ -909,19 +972,29 @@ def run():
     out_dir = os.path.join(_script_dir(), "exports")
     export_failures = list(export_all(pieces, out_dir))
 
-    # Multi-color export: body and label as separate files per middle
-    # piece, IN ADDITION to the combined <name>.step/.stl/.3mf above (not
-    # a replacement - single-color printers still use the combined file).
-    # Both halves share the exact coordinate frame they were fused in
-    # (see make_middle_piece_parts), so importing both into a slicer's
-    # "multiple objects, same position" color-assignment workflow (Bambu
-    # Studio/OrcaSlicer/PrusaSlicer all support this) reproduces the fused
-    # piece with the label in a different filament.
+    # Multi-color export, STEP+STL half: body and label as separate files
+    # per middle piece, IN ADDITION to the combined <name>.step/.stl/.3mf
+    # above (not a replacement - single-color printers still use the
+    # combined file). Both halves share the exact coordinate frame they
+    # were fused in (see make_middle_piece_parts). .3mf is deliberately
+    # excluded here (formats=("step", "stl")) - a single-object 3MF for
+    # just the body or just the label is redundant now that
+    # export_multicolor_3mf() below writes both as one combined
+    # multi-object 3MF, which is what Bambu Studio's multi-color workflow
+    # actually wants (one file, two objects at the same position) rather
+    # than two separate files to import side by side.
     split_shapes = {}
     for name, (body, label) in parts.items():
         split_shapes[name + "_body"] = body
         split_shapes[name + "_label"] = label
-    export_failures.extend(export_all(split_shapes, out_dir))
+    export_failures.extend(
+        export_all(split_shapes, out_dir, formats=("step", "stl")))
+
+    # Multi-color export, combined 3MF: body + label as two objects in one
+    # <name>_multicolor.3mf per middle piece - see export_multicolor_3mf's
+    # docstring for why this needs Mesh.export() rather than Part.export().
+    multicolor_failures = export_multicolor_3mf(parts, out_dir)
+    export_failures.extend(multicolor_failures)
 
     coupons = {
         "post_coupon_3-8in": build_post_coupon(PARAMS, "3-8in"),
@@ -930,8 +1003,10 @@ def run():
     }
     export_failures.extend(export_all(coupons, out_dir))
 
-    print("\nExported %d pieces + %d body/label part-pairs + %d coupons to %s"
-          % (len(pieces), len(split_shapes) // 2, len(coupons), out_dir))
+    print("\nExported %d pieces + %d body/label part-pairs + %d multicolor "
+          "3MFs + %d coupons to %s"
+          % (len(pieces), len(split_shapes) // 2, len(parts) - len(multicolor_failures),
+             len(coupons), out_dir))
 
     # A partial export set must never silently look like success - but let
     # every shape in both batches be attempted first (export_all already
