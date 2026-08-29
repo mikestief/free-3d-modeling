@@ -484,6 +484,10 @@ def build_dovetail_coupon(p):
     return a.fuse(b)
 
 
+# --------------------------------------------------------------------------
+# Mesh/printability utilities
+# --------------------------------------------------------------------------
+
 def fine_mesh(shape, linear=None):
     import MeshPart
     return MeshPart.meshFromShape(
@@ -769,11 +773,9 @@ def run():
     # Fit check: friction interference differs by drive (af_nominal 9.53mm
     # vs 12.70mm with the same 0.5mm undersize applied to both), so probe one
     # representative piece per drive rather than a single hand-picked size.
-    fit_results = {}
     for drive, sample_name in (("1-2in", "metric_12mm_1-2in"),
                                 ("3-8in", "metric_12mm_3-8in")):
         overlap = check_post_fit(pieces[sample_name], PARAMS, drive)
-        fit_results[sample_name] = overlap
         print("post fit probe overlap (%s, drive %s): %.2f mm3"
               % (sample_name, drive, overlap))
         assert overlap > 0.5, (
