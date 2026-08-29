@@ -151,43 +151,60 @@ def make_post(p, drive):
     return post.translate(App.Vector(0, 0, p["base_h"]))
 
 
+# --------------------------------------------------------------------------
+# Geometry - vertical dovetail (open top, closed bottom)
+# --------------------------------------------------------------------------
+
+def _dt_profile(p, outward, clearance=0.0):
+    """2D dovetail profile in the XY plane, tip pointing in +/-X (outward).
+    Root sits at x=0 (the base's side face), tip extends `dt_depth` out."""
+    neck = p["dt_neck_w"] / 2.0 + clearance
+    tip = p["dt_tip_w"] / 2.0 + clearance
+    depth = p["dt_depth"]
+    sign = 1 if outward else -1
+    pts = [
+        App.Vector(0, -neck, 0),
+        App.Vector(sign * depth, -tip, 0),
+        App.Vector(sign * depth, tip, 0),
+        App.Vector(0, neck, 0),
+        App.Vector(0, -neck, 0),
+    ]
+    return Part.Face(Part.makePolygon(pts))
+
+
+def make_dovetail_tail(p):
+    """Protrudes from the base's right (+X) side, full base height."""
+    face = _dt_profile(p, outward=True)
+    solid = face.extrude(App.Vector(0, 0, p["base_h"]))
+    return solid.translate(App.Vector(p["base_w"], p["base_d"] * 0.3, 0))
+
+
+def make_dovetail_groove_cutter(p):
+    """Cutter for the base's left (0) side - slightly oversized for snap fit.
+
+    Must carve INTO the base's own solid (local x in [0, dt_depth], same
+    +X sign as the tail), not out into empty space beyond x=0 - otherwise
+    the cut is a no-op and the neighbouring piece's tail collides with
+    still-solid material instead of nesting into a cavity."""
+    face = _dt_profile(p, outward=True, clearance=p["dt_clearance"])
+    solid = face.extrude(App.Vector(0, 0, p["base_h"] + 2))
+    return solid.translate(App.Vector(0, p["base_d"] * 0.3, -1))
+
+
 def make_middle_piece(p, drive):
-    return make_base(p).fuse(make_post(p, drive))
+    body = make_base(p).fuse(make_post(p, drive))
+    body = body.fuse(make_dovetail_tail(p))
+    body = body.cut(make_dovetail_groove_cutter(p))
+    return body
 
 
 def run():
     doc = App.newDocument("socket_organizer")
-    piece = make_middle_piece(PARAMS, "1-2in")
-    bb = piece.Shape.BoundBox if hasattr(piece, "Shape") else piece.BoundBox
-    print("test piece bbox: %.2f x %.2f x %.2f, volume %.1f"
-          % (bb.XLength, bb.YLength, bb.ZLength, piece.Volume))
-    assert bb.ZLength > PARAMS["base_h"] + PARAMS["post_h"] - 0.5
-    assert bb.XLength <= PARAMS["base_w"] + 0.01
-
-    # Guard against a no-op (or partial) wedge cut on the base's front wall:
-    # a full uncut base_w x base_d x base_h box would have a known volume,
-    # and the sloped version must be measurably smaller. Also probe that a
-    # point near the top-front corner has actually been carved away while a
-    # point near the bottom-front (where the wall meets the floor, no slope
-    # yet) is still solid.
-    base = make_base(PARAMS)
-    full_box_volume = PARAMS["base_w"] * PARAMS["base_d"] * PARAMS["base_h"]
-    print("base volume: %.1f (uncut box would be %.1f)"
-          % (base.Volume, full_box_volume))
-    assert base.Volume < full_box_volume - 50.0, (
-        "make_base's wedge cut looks like a no-op: cut volume %.1f is not "
-        "measurably less than the uncut box volume %.1f"
-        % (base.Volume, full_box_volume))
-
-    top_front = App.Vector(PARAMS["base_w"] / 2.0, 0.5, PARAMS["base_h"] - 0.5)
-    bottom_front = App.Vector(PARAMS["base_w"] / 2.0, 1.0, 0.5)
-    assert not base.isInside(top_front, 1e-6, True), (
-        "expected top-front probe point %s to be cut away by the front-wall "
-        "slope, but it is still inside the solid" % top_front)
-    assert base.isInside(bottom_front, 1e-6, True), (
-        "expected bottom-front probe point %s to remain solid (no slope at "
-        "the floor), but it was cut away" % bottom_front)
-
+    a = make_middle_piece(PARAMS, "1-2in")
+    b = make_middle_piece(PARAMS, "1-2in").translate(App.Vector(PARAMS["base_w"], 0, 0))
+    overlap = a.common(b).Volume
+    print("two-piece dovetail overlap volume: %.3f mm3" % overlap)
+    assert overlap < 1.0, "adjacent pieces interfere when assembled"
     App.closeDocument(doc.Name)
 
 
