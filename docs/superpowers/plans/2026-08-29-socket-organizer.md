@@ -184,13 +184,14 @@ Add above `run()`:
 def make_base(p):
     """Riser block with a sloped front wall. Front is the -Y face."""
     body = box(p["base_w"], p["base_d"], p["base_h"], 0, 0, 0)
-    # Slope the front wall back by cutting a wedge from the top-front edge.
+    # Slope the front wall back, continuously from the floor (Z=0, Y=0)
+    # to the top (Z=base_h, Y=slope_rise).
     slope_rise = p["base_h"] * math.tan(math.radians(p["front_slope_deg"]))
     wedge_pts = [
-        App.Vector(-1, -1, p["base_h"]),
+        App.Vector(-1, -1, 0),
         App.Vector(-1, slope_rise, p["base_h"]),
-        App.Vector(-1, -1, p["base_h"] + 1),
         App.Vector(-1, -1, p["base_h"]),
+        App.Vector(-1, -1, 0),
     ]
     wire = Part.makePolygon(wedge_pts)
     face = Part.Face(wire)
@@ -434,10 +435,10 @@ def make_cap(p, side):
     body = box(p["base_w"], p["base_d"], p["base_h"], 0, 0, 0)
     slope_rise = p["base_h"] * math.tan(math.radians(p["front_slope_deg"]))
     wedge = Part.Face(Part.makePolygon([
-        App.Vector(-1, -1, p["base_h"]),
+        App.Vector(-1, -1, 0),
         App.Vector(-1, slope_rise, p["base_h"]),
-        App.Vector(-1, -1, p["base_h"] + 1),
         App.Vector(-1, -1, p["base_h"]),
+        App.Vector(-1, -1, 0),
     ])).extrude(App.Vector(p["base_w"] + 2, 0, 0))
     body = body.cut(wedge)
 
