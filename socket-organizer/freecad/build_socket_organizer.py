@@ -729,17 +729,44 @@ def check_fuse_overlaps(p):
 # --------------------------------------------------------------------------
 
 def export_all(shapes, out_dir):
+    """Export every shape to STEP/STL/3MF, reusing a single scratch document
+    for the whole batch (not one per shape - see the sibling
+    whiteboard-stand/freecad/build_caddy.py's export_all, which avoids a
+    temporary document per export for the same reason: creating/closing a
+    FreeCAD document 45 times is needless churn and keeps this off the GUI
+    thread).
+
+    A failure exporting one shape (STEP write, recompute, or mesh write) is
+    caught, logged, and does NOT abort the run - the loop still attempts
+    every remaining shape so one bad piece can't hide the state of the other
+    44. Returns the list of shape names that failed; the caller (run())
+    decides whether that's fatal."""
     os.makedirs(out_dir, exist_ok=True)
-    for name, shape in sorted(shapes.items()):
-        doc = App.newDocument("export_tmp")
-        obj = doc.addObject("Part::Feature", name)
-        obj.Shape = shape
-        doc.recompute()
-        Part.export([obj], os.path.join(out_dir, name + ".step"))
-        mesh = fine_mesh(shape)
-        mesh.write(os.path.join(out_dir, name + ".stl"))
-        mesh.write(os.path.join(out_dir, name + ".3mf"))
+    failed = []
+    doc = App.newDocument("export_tmp")
+    try:
+        for name, shape in sorted(shapes.items()):
+            try:
+                obj = doc.addObject("Part::Feature", name)
+                obj.Shape = shape
+                doc.recompute()
+                Part.export([obj], os.path.join(out_dir, name + ".step"))
+                mesh = fine_mesh(shape)
+                mesh.write(os.path.join(out_dir, name + ".stl"))
+                mesh.write(os.path.join(out_dir, name + ".3mf"))
+            except Exception as exc:
+                App.Console.PrintWarning(
+                    "export failed for %r: %s\n" % (name, exc))
+                failed.append(name)
+            finally:
+                if doc.getObject(name) is not None:
+                    try:
+                        doc.removeObject(name)
+                    except Exception:
+                        pass
+    finally:
         App.closeDocument(doc.Name)
+    return failed
 
 
 def run():
@@ -806,17 +833,25 @@ def run():
     assert not mesh_issues, "mesh/watertight check failed, see report above"
 
     out_dir = os.path.join(_script_dir(), "exports")
-    export_all(pieces, out_dir)
+    export_failures = list(export_all(pieces, out_dir))
 
     coupons = {
         "post_coupon_3-8in": build_post_coupon(PARAMS, "3-8in"),
         "post_coupon_1-2in": build_post_coupon(PARAMS, "1-2in"),
         "dovetail_coupon": build_dovetail_coupon(PARAMS),
     }
-    export_all(coupons, out_dir)
+    export_failures.extend(export_all(coupons, out_dir))
 
     print("\nExported %d pieces + %d coupons to %s"
           % (len(pieces), len(coupons), out_dir))
+
+    # A partial export set must never silently look like success - but let
+    # every shape in both batches be attempted first (export_all already
+    # ran the full loop and collected every failure, not just the first)
+    # before failing loudly here.
+    assert not export_failures, (
+        "export failed for %d shape(s): %s"
+        % (len(export_failures), ", ".join(export_failures)))
 
     App.closeDocument(doc.Name)
 
