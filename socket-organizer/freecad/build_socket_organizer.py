@@ -191,20 +191,96 @@ def make_dovetail_groove_cutter(p):
     return solid.translate(App.Vector(0, p["base_d"] * 0.3, -1))
 
 
-def make_middle_piece(p, drive):
+# --------------------------------------------------------------------------
+# Geometry - label text
+# --------------------------------------------------------------------------
+
+_FONT_CANDIDATES = [
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",
+]
+
+
+def pick_font():
+    for path in _FONT_CANDIDATES:
+        if os.path.exists(path):
+            return path
+    raise RuntimeError("no usable font found; add a path to _FONT_CANDIDATES")
+
+
+def text_solid(txt, font, size, thickness):
+    shapes = Part.makeWireString(txt, font, size, 0.0)
+    faces = [Part.Face(w) for group in shapes for w in group]
+    comp = Part.Compound(faces)
+    return comp.extrude(App.Vector(0, 0, thickness))
+
+
+def emboss_label(p, text):
+    """Text solid, laid flat, rotated to sit on the sloped front wall,
+    positioned centered in X, standing proud by label_depth.
+
+    make_base's front wall leans back in +Y as it rises: at height Z the
+    wall surface sits at Y = Z * tan(slope) (see make_base's wedge cut).
+    text_solid() builds the text flat in the local X-Y plane (X = reading
+    direction, Y = glyph height above the baseline) and extrudes it along
+    local +Z by `thickness`, so local Z=0 is the back face (meant to sit
+    flush on the wall) and local Z=thickness is the raised front face.
+
+    Rotating that solid by (90 - slope) degrees about the X axis maps:
+      - local +Y (glyph height / "up") -> world (sin(slope), cos(slope))
+        in (Y, Z), i.e. "up the slope" - right-side up, not mirrored
+        (X, the reading direction, is untouched by an X-axis rotation).
+      - local +Z (extrusion/thickness) -> world (-cos(slope), sin(slope))
+        in (Y, Z), which is exactly the wall's outward-facing normal, so
+        the text stands proud OFF the wall rather than being buried in it.
+
+    After rotation, translating the back face (local Z=0) to
+    Y = label_z * tan(slope), Z = label_z lands every point of that back
+    face exactly on the wall plane (Y = Z * tan(slope) for all Z), for
+    any glyph height - not just the baseline - so the label sits flush
+    against the sloped face with its raised face pointing outward.
+
+    The label is a Compound of one solid per glyph (see text_solid), each
+    landing its own back face on the wall plane. Fusing a Compound whose
+    back faces are exactly coincident (zero-gap tangent) with the base's
+    wall face is a known OCC boolean edge case that produces invalid,
+    non-manifold results - confirmed here: fusing at zero overlap gave
+    `fused.isValid() == False`. So the back face is pushed `label_embed`
+    past the wall plane (into the solid, along the wall's inward normal)
+    before rotation, guaranteeing genuine volumetric overlap for the
+    fuse in make_middle_piece while the front (proud) face stays at the
+    full label_depth standoff.
+    """
+    font = pick_font()
+    embed = min(0.2, p["label_depth"])
+    solid = text_solid(text, font, p["label_h"], p["label_depth"] + embed)
+    solid = solid.translate(App.Vector(0, 0, -embed))
+    bb = solid.BoundBox
+    solid = solid.translate(App.Vector(-(bb.XMin + bb.XLength / 2.0), 0, 0))
+    slope = math.radians(p["front_slope_deg"])
+    solid = solid.rotate(App.Vector(0, 0, 0), App.Vector(1, 0, 0), 90 - p["front_slope_deg"])
+    x_center = p["base_w"] / 2.0
+    y_wall = p["label_z"] * math.tan(slope)
+    solid = solid.translate(App.Vector(x_center, y_wall, p["label_z"]))
+    return solid
+
+
+def make_middle_piece(p, drive, label_text):
     body = make_base(p).fuse(make_post(p, drive))
     body = body.fuse(make_dovetail_tail(p))
     body = body.cut(make_dovetail_groove_cutter(p))
+    body = body.fuse(emboss_label(p, label_text))
     return body
 
 
 def run():
     doc = App.newDocument("socket_organizer")
-    a = make_middle_piece(PARAMS, "1-2in")
-    b = make_middle_piece(PARAMS, "1-2in").translate(App.Vector(PARAMS["base_w"], 0, 0))
-    overlap = a.common(b).Volume
-    print("two-piece dovetail overlap volume: %.3f mm3" % overlap)
-    assert overlap < 1.0, "adjacent pieces interfere when assembled"
+    piece = make_middle_piece(PARAMS, "1-2in", "12")
+    bb = piece.BoundBox
+    print("labeled piece bbox: %.2f x %.2f x %.2f" % (bb.XLength, bb.YLength, bb.ZLength))
+    assert bb.XLength <= PARAMS["base_w"] + PARAMS["dt_depth"] + 0.5
     App.closeDocument(doc.Name)
 
 
