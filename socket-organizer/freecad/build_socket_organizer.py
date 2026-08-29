@@ -385,6 +385,12 @@ def run():
     assert len(pieces) == expected == 42
 
     coupon = build_dovetail_coupon(PARAMS)
+    # NOTE: this only proves the two halves fuse into one watertight solid
+    # (i.e. the flat base walls touch with no gap). It does NOT verify the
+    # dovetail tail/groove actually interlock - two pieces would fuse into
+    # 1 solid via wall contact alone even if dt_* geometry were wrong.
+    # Don't treat this as dovetail-fit proof; that needs eyeballing the
+    # coupon geometry or a real print.
     assert len(coupon.Solids) == 1, "dovetail coupon halves did not fuse into one piece"
     print("dovetail coupon: 1 solid, volume %.1f mm3" % coupon.Volume)
 
