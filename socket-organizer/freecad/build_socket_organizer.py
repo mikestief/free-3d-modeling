@@ -724,6 +724,24 @@ def check_fuse_overlaps(p):
     return issues
 
 
+# --------------------------------------------------------------------------
+# Export
+# --------------------------------------------------------------------------
+
+def export_all(shapes, out_dir):
+    os.makedirs(out_dir, exist_ok=True)
+    for name, shape in sorted(shapes.items()):
+        doc = App.newDocument("export_tmp")
+        obj = doc.addObject("Part::Feature", name)
+        obj.Shape = shape
+        doc.recompute()
+        Part.export([obj], os.path.join(out_dir, name + ".step"))
+        mesh = fine_mesh(shape)
+        mesh.write(os.path.join(out_dir, name + ".stl"))
+        mesh.write(os.path.join(out_dir, name + ".3mf"))
+        App.closeDocument(doc.Name)
+
+
 def run():
     doc = App.newDocument("socket_organizer")
     pieces = generate_all(PARAMS)
@@ -786,6 +804,19 @@ def run():
     assert not fuse_issues, "fuse-overlap check failed, see report above"
     assert not printability_issues, "printability check failed, see report above"
     assert not mesh_issues, "mesh/watertight check failed, see report above"
+
+    out_dir = os.path.join(_script_dir(), "exports")
+    export_all(pieces, out_dir)
+
+    coupons = {
+        "post_coupon_3-8in": build_post_coupon(PARAMS, "3-8in"),
+        "post_coupon_1-2in": build_post_coupon(PARAMS, "1-2in"),
+        "dovetail_coupon": build_dovetail_coupon(PARAMS),
+    }
+    export_all(coupons, out_dir)
+
+    print("\nExported %d pieces + %d coupons to %s"
+          % (len(pieces), len(coupons), out_dir))
 
     App.closeDocument(doc.Name)
 
