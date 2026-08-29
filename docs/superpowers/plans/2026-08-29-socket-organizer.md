@@ -447,9 +447,16 @@ git commit -m "socket-organizer: embossed size label"
 def make_cap(p, side):
     """side='start' has a tail on its right edge (mates leftward into the
     row); side='end' has a groove on its left edge (mates rightward). The
-    opposite edge is rounded off closed."""
+    opposite edge is rounded off closed.
+
+    The rounding-corner box must overlap the SAME side of round_x as the
+    body actually occupies (round_x for 'start' since the body spans
+    [0, base_w] and the corner to round is at x=0; round_x - r for 'end'
+    since the corner to round is at x=base_w) - the reverse placement was
+    a shipped bug (0mm3 overlap, a silent no-op) caught by live volume
+    verification."""
     body = box(p["base_w"], p["base_d"], p["base_h"], 0, 0, 0)
-    slope_rise = p["base_h"] * math.tan(math.radians(p["front_slope_deg"]))
+    slope_rise = wall_y_at_z(p, p["base_h"])
     wedge = Part.Face(Part.makePolygon([
         App.Vector(-1, -1, 0),
         App.Vector(-1, slope_rise, p["base_h"]),
@@ -468,20 +475,24 @@ def make_cap(p, side):
     round_cutter = Part.makeCylinder(
         r, p["base_h"] + 2, App.Vector(round_x, p["base_d"] * 0.3, -1))
     corner = box(r, p["base_d"], p["base_h"] + 2,
-                 round_x - r if side == "start" else round_x, 0, -1)
-    body = body.cut(corner.cut(round_cutter)) if side == "start" \
-        else body.cut(corner.cut(round_cutter.translate(App.Vector(0, 0, 0))))
+                 round_x if side == "start" else round_x - r, 0, -1)
+    body = body.cut(corner.cut(round_cutter))
     return body
 ```
 
 - [ ] **Step 2: Update `run()` to build both caps and check they mate with a middle piece**
+
+A 'start' cap's tail is on its RIGHT edge, so the mating middle piece must
+sit to the cap's right (+base_w), not its left - the reverse direction was
+a shipped bug (a real 200mm3 collision, not a meaningful "no overlap"
+check) caught by live volume verification.
 
 ```python
 def run():
     doc = App.newDocument("socket_organizer")
     cap = make_cap(PARAMS, "start")
     mid = make_middle_piece(PARAMS, "1-2in", "12").translate(
-        App.Vector(-PARAMS["base_w"], 0, 0))
+        App.Vector(PARAMS["base_w"], 0, 0))
     overlap = cap.common(mid).Volume
     print("cap-to-middle overlap volume: %.3f mm3" % overlap)
     assert overlap < 1.0
