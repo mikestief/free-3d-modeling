@@ -316,15 +316,10 @@ def make_cap(p, side):
     mm3 of corner material, producing a rounded nose centered on the
     dovetail's Y offset (base_d * 0.3) rather than two square corners.
     """
-    body = box(p["base_w"], p["base_d"], p["base_h"], 0, 0, 0)
-    slope_rise = wall_y_at_z(p, p["base_h"])
-    wedge = Part.Face(Part.makePolygon([
-        App.Vector(-1, -1, 0),
-        App.Vector(-1, slope_rise, p["base_h"]),
-        App.Vector(-1, -1, p["base_h"]),
-        App.Vector(-1, -1, 0),
-    ])).extrude(App.Vector(p["base_w"] + 2, 0, 0))
-    body = body.cut(wedge)
+    if side not in ("start", "end"):
+        raise ValueError("side must be 'start' or 'end', got %r" % side)
+
+    body = make_base(p)
 
     r = p["cap_round_r"]
     if side == "start":
