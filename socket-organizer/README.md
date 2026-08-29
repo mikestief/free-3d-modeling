@@ -24,6 +24,12 @@ disturbing its neighbors, so you build out exactly the sockets you own.
 - 40 middle pieces + 2 end caps = 42 pieces total, all sharing one dovetail
   interface — mix metric, SAE, and drive size in any order
 
+A row is any number of middle pieces snapped together, with one cap on
+each end — the caps close off the exposed dovetail edge so the finished
+row doesn't have a raw connector sticking out. Caps are universal, not
+sized to any socket, so the same two caps close off any row regardless of
+which or how many middle pieces you use.
+
 ## Print the coupons first
 
 Three small coupons ship alongside the full set:
