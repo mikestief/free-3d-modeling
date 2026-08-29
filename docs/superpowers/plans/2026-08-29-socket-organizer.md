@@ -291,8 +291,14 @@ def make_dovetail_tail(p):
 
 
 def make_dovetail_groove_cutter(p):
-    """Cutter for the base's left (0) side - slightly oversized for snap fit."""
-    face = _dt_profile(p, outward=False, clearance=p["dt_clearance"])
+    """Cutter for the base's left (0) side - slightly oversized for snap fit.
+    Uses outward=True (same sign as the tail) so it carves INTO the base's
+    own material at local x in [0, dt_depth] - that's where a neighbor's
+    tail lands once translated by base_w. outward=False would place the
+    profile at x in [-dt_depth, 0], outside the base entirely, cutting
+    nothing (verified: this shipped a near no-op groove, caught by the
+    two-piece overlap check in run())."""
+    face = _dt_profile(p, outward=True, clearance=p["dt_clearance"])
     solid = face.extrude(App.Vector(0, 0, p["base_h"] + 2))
     return solid.translate(App.Vector(0, p["base_d"] * 0.3, -1))
 
