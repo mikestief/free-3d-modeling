@@ -375,7 +375,15 @@ def text_solid(txt, font, size, thickness):
 
 def emboss_label(p, text):
     """Text solid, laid flat, rotated to sit on the sloped front wall,
-    positioned centered in X, standing proud by label_depth."""
+    positioned centered in X, standing proud by label_depth.
+
+    The wall surface (from make_base's wedge cut) sits at Y = Z*tan(slope)
+    for Z in [0, base_h] - NOT at a fixed offset. The label is embedded
+    slightly (0.2mm, capped by label_depth) into the wall rather than left
+    exactly tangent to it: OCC's boolean fuse can produce invalid/
+    non-manifold geometry when two solids share an exactly-coincident face
+    (verified: isValid() was False with zero embed), so a small controlled
+    overlap is standard practice for CAD emboss features."""
     font = pick_font()
     solid = text_solid(text, font, p["label_h"], p["label_depth"])
     bb = solid.BoundBox
@@ -383,8 +391,10 @@ def emboss_label(p, text):
     slope = math.radians(p["front_slope_deg"])
     solid = solid.rotate(App.Vector(0, 0, 0), App.Vector(1, 0, 0), 90 - p["front_slope_deg"])
     x_center = p["base_w"] / 2.0
-    y_front = -math.sin(slope) * p["label_depth"]
-    solid = solid.translate(App.Vector(x_center, y_front, p["label_z"]))
+    embed = min(0.2, p["label_depth"])
+    y_wall = p["label_z"] * math.tan(slope)
+    y_pos = y_wall - embed * math.cos(slope)
+    solid = solid.translate(App.Vector(x_center, y_pos, p["label_z"]))
     return solid
 
 
