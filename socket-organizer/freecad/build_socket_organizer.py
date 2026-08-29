@@ -110,13 +110,17 @@ def sae_key(n32):
 def make_base(p):
     """Riser block with a sloped front wall. Front is the -Y face."""
     body = box(p["base_w"], p["base_d"], p["base_h"], 0, 0, 0)
-    # Slope the front wall back by cutting a wedge from the top-front edge.
+    # Slope the front wall back by cutting a wedge from the whole front face.
+    # In the Y-Z plane the cut is a triangle anchored at the bottom-front
+    # corner (Y=0, Z=0) - no material removed there - rising linearly to
+    # (Y=slope_rise, Z=base_h) at the top, so the wall leans back the full
+    # height of the piece rather than only near the top.
     slope_rise = p["base_h"] * math.tan(math.radians(p["front_slope_deg"]))
     wedge_pts = [
-        App.Vector(-1, -1, p["base_h"]),
+        App.Vector(-1, 0, 0),
         App.Vector(-1, slope_rise, p["base_h"]),
-        App.Vector(-1, -1, p["base_h"] + 1),
-        App.Vector(-1, -1, p["base_h"]),
+        App.Vector(-1, 0, p["base_h"]),
+        App.Vector(-1, 0, 0),
     ]
     wire = Part.makePolygon(wedge_pts)
     face = Part.Face(wire)
@@ -159,6 +163,31 @@ def run():
           % (bb.XLength, bb.YLength, bb.ZLength, piece.Volume))
     assert bb.ZLength > PARAMS["base_h"] + PARAMS["post_h"] - 0.5
     assert bb.XLength <= PARAMS["base_w"] + 0.01
+
+    # Guard against a no-op (or partial) wedge cut on the base's front wall:
+    # a full uncut base_w x base_d x base_h box would have a known volume,
+    # and the sloped version must be measurably smaller. Also probe that a
+    # point near the top-front corner has actually been carved away while a
+    # point near the bottom-front (where the wall meets the floor, no slope
+    # yet) is still solid.
+    base = make_base(PARAMS)
+    full_box_volume = PARAMS["base_w"] * PARAMS["base_d"] * PARAMS["base_h"]
+    print("base volume: %.1f (uncut box would be %.1f)"
+          % (base.Volume, full_box_volume))
+    assert base.Volume < full_box_volume - 50.0, (
+        "make_base's wedge cut looks like a no-op: cut volume %.1f is not "
+        "measurably less than the uncut box volume %.1f"
+        % (base.Volume, full_box_volume))
+
+    top_front = App.Vector(PARAMS["base_w"] / 2.0, 0.5, PARAMS["base_h"] - 0.5)
+    bottom_front = App.Vector(PARAMS["base_w"] / 2.0, 1.0, 0.5)
+    assert not base.isInside(top_front, 1e-6, True), (
+        "expected top-front probe point %s to be cut away by the front-wall "
+        "slope, but it is still inside the solid" % top_front)
+    assert base.isInside(bottom_front, 1e-6, True), (
+        "expected bottom-front probe point %s to remain solid (no slope at "
+        "the floor), but it was cut away" % bottom_front)
+
     App.closeDocument(doc.Name)
 
 
