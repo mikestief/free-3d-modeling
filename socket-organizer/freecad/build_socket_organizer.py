@@ -63,6 +63,8 @@ PARAMS = {
     "label_h":         4.0,   # embossed text height (font size)
     "label_depth":     0.6,   # how far the text stands proud
     "label_z":         4.0,   # text baseline height on the sloped front wall
+    "label_embed":     0.2,   # back-face push past the wall plane, capped by
+                               # label_depth - see emboss_label docstring
 
     # --- cap (start/end piece) ----------------------------------------------
     "cap_round_r":     8.0,   # radius of the closed rounded end
@@ -107,6 +109,15 @@ def sae_key(n32):
 # Geometry - base and post
 # --------------------------------------------------------------------------
 
+def wall_y_at_z(p, z):
+    """Y position of the sloped front wall's surface at height z.
+
+    Single source of truth for the wall's geometry: make_base's wedge cut
+    and emboss_label's placement both derive from this same line so they
+    can't silently drift apart."""
+    return z * math.tan(math.radians(p["front_slope_deg"]))
+
+
 def make_base(p):
     """Riser block with a sloped front wall. Front is the -Y face."""
     body = box(p["base_w"], p["base_d"], p["base_h"], 0, 0, 0)
@@ -115,7 +126,7 @@ def make_base(p):
     # corner (Y=0, Z=0) - no material removed there - rising linearly to
     # (Y=slope_rise, Z=base_h) at the top, so the wall leans back the full
     # height of the piece rather than only near the top.
-    slope_rise = p["base_h"] * math.tan(math.radians(p["front_slope_deg"]))
+    slope_rise = wall_y_at_z(p, p["base_h"])
     wedge_pts = [
         App.Vector(-1, 0, 0),
         App.Vector(-1, slope_rise, p["base_h"]),
@@ -222,8 +233,9 @@ def emboss_label(p, text):
     positioned centered in X, standing proud by label_depth.
 
     make_base's front wall leans back in +Y as it rises: at height Z the
-    wall surface sits at Y = Z * tan(slope) (see make_base's wedge cut).
-    text_solid() builds the text flat in the local X-Y plane (X = reading
+    wall surface sits at Y = wall_y_at_z(p, Z) (see make_base's wedge cut,
+    which uses the same helper). text_solid() builds the text flat in the
+    local X-Y plane (X = reading
     direction, Y = glyph height above the baseline) and extrudes it along
     local +Z by `thickness`, so local Z=0 is the back face (meant to sit
     flush on the wall) and local Z=thickness is the raised front face.
@@ -237,32 +249,32 @@ def emboss_label(p, text):
         the text stands proud OFF the wall rather than being buried in it.
 
     After rotation, translating the back face (local Z=0) to
-    Y = label_z * tan(slope), Z = label_z lands every point of that back
-    face exactly on the wall plane (Y = Z * tan(slope) for all Z), for
-    any glyph height - not just the baseline - so the label sits flush
-    against the sloped face with its raised face pointing outward.
+    Y = wall_y_at_z(p, label_z), Z = label_z lands every point of that
+    back face exactly on the wall plane (Y = wall_y_at_z(p, Z) for all
+    Z), for any glyph height - not just the baseline - so the label sits
+    flush against the sloped face with its raised face pointing outward.
 
     The label is a Compound of one solid per glyph (see text_solid), each
     landing its own back face on the wall plane. Fusing a Compound whose
     back faces are exactly coincident (zero-gap tangent) with the base's
     wall face is a known OCC boolean edge case that produces invalid,
     non-manifold results - confirmed here: fusing at zero overlap gave
-    `fused.isValid() == False`. So the back face is pushed `label_embed`
-    past the wall plane (into the solid, along the wall's inward normal)
-    before rotation, guaranteeing genuine volumetric overlap for the
-    fuse in make_middle_piece while the front (proud) face stays at the
-    full label_depth standoff.
+    `fused.isValid() == False`. So the back face is pushed
+    `p["label_embed"]` past the wall plane (into the solid, along the
+    wall's inward normal, capped by label_depth) before rotation,
+    guaranteeing genuine volumetric overlap for the fuse in
+    make_middle_piece while the front (proud) face stays at the full
+    label_depth standoff.
     """
     font = pick_font()
-    embed = min(0.2, p["label_depth"])
+    embed = min(p["label_embed"], p["label_depth"])
     solid = text_solid(text, font, p["label_h"], p["label_depth"] + embed)
     solid = solid.translate(App.Vector(0, 0, -embed))
     bb = solid.BoundBox
     solid = solid.translate(App.Vector(-(bb.XMin + bb.XLength / 2.0), 0, 0))
-    slope = math.radians(p["front_slope_deg"])
     solid = solid.rotate(App.Vector(0, 0, 0), App.Vector(1, 0, 0), 90 - p["front_slope_deg"])
     x_center = p["base_w"] / 2.0
-    y_wall = p["label_z"] * math.tan(slope)
+    y_wall = wall_y_at_z(p, p["label_z"])
     solid = solid.translate(App.Vector(x_center, y_wall, p["label_z"]))
     return solid
 
