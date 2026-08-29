@@ -50,7 +50,9 @@ PARAMS = {
     "post_af_undersize": 0.5,   # post_af = nominal - this, per drive
     "post_corner_r":   0.6,
     "post_h":          11.0,
-    "post_top_chamfer": 1.0,    # lead-in chamfer, top-facing only
+    "post_top_chamfer": 0.5,    # lead-in chamfer, top-facing only. Must be
+                                  # <= post_corner_r or OCC's chamfer on the
+                                  # tiny fillet-arc top edges self-intersects.
 
     # --- dovetail (vertical snap: open top, closed bottom) ------------------
     "dt_neck_w":       4.0,   # width where the tail meets the base
