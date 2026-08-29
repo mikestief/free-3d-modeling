@@ -358,6 +358,23 @@ def generate_all(p):
     return out
 
 
+# --------------------------------------------------------------------------
+# Fit coupons
+# --------------------------------------------------------------------------
+
+def build_post_coupon(p, drive):
+    """A single middle piece at a mid-range size, for real-socket test fit."""
+    size = "12" if drive == "1-2in" else sae_label(14)  # 12mm / 7/16in
+    return make_middle_piece(p, drive, size)
+
+
+def build_dovetail_coupon(p):
+    """Two adjacent middle pieces, pre-assembled, to test the snap by hand."""
+    a = make_middle_piece(p, "3-8in", "10")
+    b = make_middle_piece(p, "3-8in", "11").translate(App.Vector(p["base_w"], 0, 0))
+    return a.fuse(b)
+
+
 def run():
     doc = App.newDocument("socket_organizer")
     pieces = generate_all(PARAMS)
@@ -366,6 +383,11 @@ def run():
     expected = n_metric + n_sae + 2
     print("generated %d pieces (expected %d)" % (len(pieces), expected))
     assert len(pieces) == expected == 42
+
+    coupon = build_dovetail_coupon(PARAMS)
+    assert len(coupon.Solids) == 1, "dovetail coupon halves did not fuse into one piece"
+    print("dovetail coupon: 1 solid, volume %.1f mm3" % coupon.Volume)
+
     App.closeDocument(doc.Name)
 
 
