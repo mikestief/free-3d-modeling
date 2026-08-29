@@ -874,6 +874,51 @@ def export_multicolor_3mf(parts, out_dir):
     return failed
 
 
+def check_multicolor_3mf_structure(path):
+    """Opens a written `<name>_multicolor.3mf` as a zip and parses
+    3D/3dmodel.model to confirm it actually contains 2 <object> resource
+    entries and 2 <item> build entries - the one structural property the
+    entire multi-color feature depends on (see export_multicolor_3mf's
+    docstring: Mesh.export() is documented/assumed to write each
+    Mesh::Feature passed to it as its own <object>/<item> pair, which is
+    what makes a slicer show body and label as two independently-colorable
+    objects instead of one merged mesh). That assumption was previously
+    "verified by hand via zip/XML inspection" only, with no automated
+    coverage - if a future FreeCAD version changed Mesh.export()'s
+    multi-object behavior, every other assert in run() would still pass
+    and the failure would only surface downstream in someone's slicer.
+    This is the automated version of that same by-hand check, run against
+    a real file on disk after export_multicolor_3mf() has written it.
+
+    Returns (n_objects, n_items) rather than asserting itself, so the
+    caller can report both counts before deciding whether to fail (same
+    style as check_fuse_overlap/check_cap_corner_solid returning a
+    description instead of asserting inline).
+
+    Namespace-agnostic on purpose: 3MF's core namespace is
+    "http://schemas.microsoft.com/3dmanufacturing/core/2015/02", but
+    matching by local tag name (stripping any "{uri}" prefix ElementTree
+    adds) is more robust than hardcoding that URI - it does not care
+    whether a future writer changes the namespace URI or declares a
+    default vs. prefixed namespace, only that the elements are still
+    named <object> and <item> per the 3MF core spec.
+    """
+    import zipfile
+    import xml.etree.ElementTree as ET
+
+    with zipfile.ZipFile(path) as zf:
+        with zf.open("3D/3dmodel.model") as f:
+            root = ET.parse(f).getroot()
+
+    def local_tag(el):
+        tag = el.tag
+        return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+
+    n_objects = sum(1 for el in root.iter() if local_tag(el) == "object")
+    n_items = sum(1 for el in root.iter() if local_tag(el) == "item")
+    return n_objects, n_items
+
+
 def run():
     doc = App.newDocument("socket_organizer")
     # Build the 40 middle pieces' (body, label) parts once, then derive the
@@ -995,6 +1040,33 @@ def run():
     # docstring for why this needs Mesh.export() rather than Part.export().
     multicolor_failures = export_multicolor_3mf(parts, out_dir)
     export_failures.extend(multicolor_failures)
+
+    print("\n--- multi-color 3MF structure spot-check "
+          "(2 objects / 2 items expected) ---")
+    # Reuses the same two representative piece names as the
+    # part-reconstruction spot-check above, rather than the full 40, for the
+    # same reason check_post_fit only probes a couple of representative
+    # pieces instead of all 42: the geometry that determines object/item
+    # count here (Mesh.export() being handed a 2-element list) does not vary
+    # by piece, only the file being real and on disk does. Skips a name if
+    # its multicolor export already failed above - there is no file to open.
+    multicolor_structure_issues = []
+    for name in ("metric_12mm_1-2in", "sae_5-16in_3-8in"):
+        if name in multicolor_failures:
+            continue
+        mc_path = os.path.join(out_dir, name + "_multicolor.3mf")
+        n_objects, n_items = check_multicolor_3mf_structure(mc_path)
+        print("%s_multicolor.3mf: %d object(s), %d item(s)"
+              % (name, n_objects, n_items))
+        if n_objects != 2 or n_items != 2:
+            multicolor_structure_issues.append(
+                "%s_multicolor.3mf: expected 2 objects/2 items, got "
+                "%d objects/%d items" % (name, n_objects, n_items))
+    # Folded into export_failures (asserted at the end, below, alongside
+    # every other export outcome) rather than asserted here immediately -
+    # same "let every shape be attempted first" reasoning as the rest of
+    # this function's export handling.
+    export_failures.extend(multicolor_structure_issues)
 
     coupons = {
         "post_coupon_3-8in": build_post_coupon(PARAMS, "3-8in"),
