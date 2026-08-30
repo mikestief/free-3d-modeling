@@ -67,8 +67,15 @@ AMS, or any similar MMU/AMS setup). For each of the 40 middle pieces
   Bambu-style single-file workflow above; they're kept for non-3MF
   tooling or CAD software that needs the split geometry on its own.
 
-The plain `<name>.stl` / `.step` / `.3mf` files (the fused single-color
-piece) are unchanged and still there for single-color printing.
+The plain `<name>.stl` / `.step` files (the fused single-color piece) are
+unchanged and still there for single-color printing. There's no plain
+`<name>.3mf` for the 40 middle pieces — `<name>_multicolor.3mf` above
+supersedes it for anyone with a multi-color printer, and it's redundant
+with `.stl`/`.step` for single-color printing. If you have a multi-color
+printer but want a single-color result, use `<name>_multicolor.3mf` and
+assign both objects (body and label) the same filament/AMS slot instead of
+different ones. The 2 end caps have no label or multicolor variant, so
+they keep their plain `<name>.3mf` as before.
 
 ## Regenerating
 
@@ -77,10 +84,11 @@ cd socket-organizer/freecad
 freecadcmd build_socket_organizer.py
 ```
 
-Needs FreeCAD 1.0+. Outputs land in `exports/` as STEP, STL and 3MF, one
-set per piece plus the coupons. Every run reports fit, structural,
-printability and mesh-health checks — see the repo root README for what
-each one means.
+Needs FreeCAD 1.0+. Outputs land in `exports/` as STEP and STL for every
+piece, plus a plain 3MF for the 2 end caps and 3 coupons (the 40 middle
+pieces get a multi-color 3MF instead — see above). Every run reports fit,
+structural, printability and mesh-health checks — see the repo root
+README for what each one means.
 
 ---
 

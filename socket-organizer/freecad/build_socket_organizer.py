@@ -1394,7 +1394,18 @@ def run():
     assert not mesh_issues, "mesh/watertight check failed, see report above"
 
     out_dir = os.path.join(_script_dir(), "exports")
-    export_failures = list(export_all(pieces, out_dir))
+    # The 40 middle pieces skip .3mf here (formats=("step", "stl")):
+    # <name>_multicolor.3mf below already supersedes the combined .3mf for
+    # anyone with a multi-color printer, and <name>.step/.stl cover
+    # single-color printing, so a plain combined <name>.3mf would be pure
+    # redundancy. The 2 caps have no label/multicolor variant, so they keep
+    # the full default formats (step+stl+3mf) - their .3mf is still the only
+    # 3MF option for them.
+    middle_pieces = {name: pieces[name] for name in parts}
+    cap_pieces = {"cap_start": pieces["cap_start"], "cap_end": pieces["cap_end"]}
+    export_failures = list(
+        export_all(middle_pieces, out_dir, formats=("step", "stl")))
+    export_failures.extend(export_all(cap_pieces, out_dir))
 
     # Multi-color export, STEP+STL half: body and label as separate files
     # per middle piece, IN ADDITION to the combined <name>.step/.stl/.3mf
