@@ -294,9 +294,9 @@ COUNTER_WIDTH_FLOOR = 1.0
 # metric-equivalent bore (25.4mm) and running it through the same line
 # predicts an OD of ~35.67mm, slightly LARGER than 25mm's measured 35mm -
 # see check_socket_od_clearance(), which sweeps every distinct size in the
-# whole table (PARAMS["metric_mm_3_8in_only"]/["metric_mm"]/
-# ["metric_mm_1_2in_only"] and PARAMS["sae_frac_32nds"]) through this model
-# rather than hardcoding an assumed worst case. The sweep is cheap (a few
+# whole table (derived from _middle_piece_specs(p), the single source of
+# truth for the size/category table) through this model rather than
+# hardcoding an assumed worst case. The sweep is cheap (a few
 # cylinder/box booleans per size, not full piece geometry), so it costs
 # nothing to check every size rather than trying to guess in advance which
 # subset holds the worst case.
@@ -334,12 +334,24 @@ def estimated_socket_od_mm(nominal_mm):
     bore size (mm), anchored on the two real measured points in
     SOCKET_OD_POINTS_MM. Not a physical model - sockets aren't actually
     linear in OD-vs-bore across their whole range - but a reasonable
-    estimate near the two measured points (22mm, 25mm) that stays
-    conservative (an underestimate, if anything) further out, which is
-    good enough for check_socket_od_clearance()'s sweep across the whole
-    size table (6-25mm metric, 5/16-1in SAE). See SOCKET_OD_POINTS_MM's
-    comment for why this beats hardcoding a single assumed worst-case
-    size."""
+    estimate near the two measured points (22mm, 25mm), which is exactly
+    what check_socket_od_clearance()'s sweep needs it for: finding the
+    TRUE worst case among the sizes near those anchors (25mm metric, 1in
+    SAE - see SOCKET_OD_POINTS_MM's comment) and confirming it clears the
+    base footprint.
+
+    This is NOT a trustworthy estimate far below the anchors: extrapolated
+    down to small nominal sizes, the line goes unphysical - it predicts an
+    OD *smaller than the bore itself*, which is impossible (a socket's OD
+    can never be less than its own drive/bore size). E.g.
+    estimated_socket_od_mm(6) = 3.33mm, estimated_socket_od_mm(7) = 5.0mm.
+    check_socket_od_clearance()'s sweep still runs this model across the
+    whole 6-25mm metric / 5/16-1in SAE table, including those small sizes
+    - harmlessly, since they're nowhere near the true worst case and pass
+    trivially regardless of how wrong their individual OD estimate is -
+    but a PASS on a small size is not real assurance that this model was
+    doing meaningful work there. See SOCKET_OD_POINTS_MM's comment for why
+    the sweep beats hardcoding a single assumed worst-case size."""
     (x0, y0), (x1, y1) = SOCKET_OD_POINTS_MM
     slope = (y1 - y0) / (x1 - x0)
     return y0 + slope * (nominal_mm - x0)
@@ -823,11 +835,16 @@ def make_cap(p, side):
 # --------------------------------------------------------------------------
 
 def _middle_piece_specs(p):
-    """Yields (name, drive, label_text) for all 59 middle pieces (not the
-    2 caps, which have no label). Single source of truth for the
-    name/drive/label mapping, shared by generate_all_parts and (through
-    it) generate_all, so the two can't silently diverge on which pieces
-    exist or what they're named.
+    """Yields (name, drive, label_text, nominal_mm) for all 59 middle
+    pieces (not the 2 caps, which have no label). Single source of truth
+    for the name/drive/label/size mapping - shared by generate_all_parts
+    (and through it generate_all), check_label_legibility, and
+    check_socket_od_clearance, plus run()'s expected piece count (via
+    len(list(_middle_piece_specs(p)))). None of those can silently
+    diverge on which pieces exist, what they're named, or what nominal
+    bore size (mm) each one represents, because they all read it off this
+    one generator instead of independently re-encoding the category
+    structure from PARAMS.
 
     Three size categories, matching the user's photographed socket trays
     (their 3/8" drive tray runs 6-22mm metric / 5/16-1in SAE; their 1/2"
@@ -843,20 +860,34 @@ def _middle_piece_specs(p):
         equivalent drive-only category any more - the user's 3/8" tray
         goes all the way to 1in, same as their 1/2" tray.
 
+    metric_categories below is (size list, drives tuple) per category -
+    one loop over that table replaces what used to be three
+    near-identical copy-pasted loops. Adding a 4th category, or changing
+    which drives a category covers, only means editing this table (or the
+    PARAMS lists it reads from) - nowhere else in the file hand-encodes
+    the category structure any more.
+
     2x1 + 15x2 + 3x1 = 35 metric pieces; 12x2 = 24 SAE pieces (all
     common). 35 + 24 = 59 middle pieces total."""
-    for mm in p["metric_mm_3_8in_only"]:
-        yield "metric_%dmm_%s" % (mm, "3-8in"), "3-8in", str(mm)
-    for mm in p["metric_mm"]:
-        for drive in p["drives"]:
-            yield "metric_%dmm_%s" % (mm, drive), drive, str(mm)
-    for mm in p["metric_mm_1_2in_only"]:
-        yield "metric_%dmm_%s" % (mm, "1-2in"), "1-2in", str(mm)
-    for n32 in p["sae_frac_32nds"]:
-        label = sae_label(n32)
-        key = sae_key(n32)
-        for drive in p["drives"]:
-            yield "sae_%s_%s" % (key, drive), drive, label
+    metric_categories = [
+        (p["metric_mm_3_8in_only"], ("3-8in",)),
+        (p["metric_mm"], tuple(p["drives"])),
+        (p["metric_mm_1_2in_only"], ("1-2in",)),
+    ]
+    for sizes, drives in metric_categories:
+        for mm in sizes:
+            for drive in drives:
+                yield ("metric_%dmm_%s" % (mm, drive), drive, str(mm),
+                       float(mm))
+
+    sae_categories = [(p["sae_frac_32nds"], tuple(p["drives"]))]
+    for sizes, drives in sae_categories:
+        for n32 in sizes:
+            label = sae_label(n32)
+            key = sae_key(n32)
+            nominal_mm = n32 / 32.0 * 25.4
+            for drive in drives:
+                yield "sae_%s_%s" % (key, drive), drive, label, nominal_mm
 
 
 def generate_all_parts(p):
@@ -865,7 +896,7 @@ def generate_all_parts(p):
     make_cap) and so have nothing to split. This is the basis for the
     multi-color _body/_label export pair."""
     return {name: make_middle_piece_parts(p, drive, label_text)
-            for name, drive, label_text in _middle_piece_specs(p)}
+            for name, drive, label_text, _nominal_mm in _middle_piece_specs(p)}
 
 
 def generate_all_parts_multicolor(p, parts):
@@ -893,7 +924,7 @@ def generate_all_parts_multicolor(p, parts):
     confirmed via test print to produce a visible seam around the label in
     Bambu Studio's slice preview."""
     out = {}
-    for name, drive, label_text in _middle_piece_specs(p):
+    for name, drive, label_text, _nominal_mm in _middle_piece_specs(p):
         body, _unused_full_embed_label = parts[name]
         label = emboss_label(p, label_text, embed=p["label_embed_multicolor"])
         out[name] = (body, label)
@@ -1197,7 +1228,7 @@ def check_label_legibility(p, parts):
     nothing there to reuse for it."""
     seen = set()
     label_by_text = {}
-    for name, _drive, label_text in _middle_piece_specs(p):
+    for name, _drive, label_text, _nominal_mm in _middle_piece_specs(p):
         if label_text in seen:
             continue
         seen.add(label_text)
@@ -1271,8 +1302,10 @@ def check_socket_od_clearance(p):
     edge by at least OD_CLEARANCE_FLOOR, in every direction, using real OCC
     B-rep booleans rather than the on-paper distance arithmetic in PARAMS's
     comment. The base footprint doesn't depend on drive, so this sweeps
-    every distinct size once rather than trying to guess which
-    drive-scoping category holds the worst case.
+    every distinct size once (derived from _middle_piece_specs(p), the
+    single source of truth for the size/category table - see its
+    docstring) rather than trying to guess which drive-scoping category
+    holds the worst case.
 
     For each size, builds a real Part.makeCylinder probe of the estimated
     OD (see estimated_socket_od_mm/SOCKET_OD_POINTS_MM), centered at the
@@ -1308,11 +1341,24 @@ def check_socket_od_clearance(p):
     tail = make_dovetail_tail(p)
     groove = make_dovetail_groove_cutter(p)
 
-    metric_sizes = (p["metric_mm_3_8in_only"] + p["metric_mm"]
-                    + p["metric_mm_1_2in_only"])
-    sizes_mm = [("metric %dmm" % mm, float(mm)) for mm in metric_sizes]
-    sizes_mm += [("sae %s" % sae_label(n32), n32 / 32.0 * 25.4)
-                 for n32 in p["sae_frac_32nds"]]
+    # Derive the distinct sizes from _middle_piece_specs (like
+    # check_label_legibility does) rather than independently re-deriving
+    # the category structure from PARAMS - that generator is the single
+    # source of truth for which sizes/categories exist. Dedup by
+    # (metric-or-sae, nominal_mm) since the base footprint doesn't depend
+    # on drive, so a size appearing once per drive (the common category)
+    # should only be swept once here.
+    seen_sizes = set()
+    sizes_mm = []
+    for name, _drive, label_text, nominal_mm in _middle_piece_specs(p):
+        is_sae = name.startswith("sae_")
+        key = ("sae", nominal_mm) if is_sae else ("metric", nominal_mm)
+        if key in seen_sizes:
+            continue
+        seen_sizes.add(key)
+        size_label = (("sae %s" % label_text) if is_sae else
+                      ("metric %dmm" % int(nominal_mm)))
+        sizes_mm.append((size_label, nominal_mm))
 
     worst_label, worst_margin = None, None
     for size_label, nominal_mm in sizes_mm:
@@ -1521,15 +1567,16 @@ def run():
     pieces = {name: body.fuse(label) for name, (body, label) in parts.items()}
     pieces["cap_start"] = make_cap(PARAMS, "start")
     pieces["cap_end"] = make_cap(PARAMS, "end")
+    # Expected count comes straight from _middle_piece_specs(PARAMS) - the
+    # single source of truth for the size/category table (see its
+    # docstring) - plus the 2 caps, rather than a hand-derived formula
+    # that would need to be kept in sync by hand if a category or size
+    # list ever changes. As of the 3-category size-coverage extension:
     # 2 metric (6-7mm, 3/8in only) + 15 metric x 2 drives (8-22mm) + 3
     # metric (23-25mm, 1/2in only) = 35 metric. 12 SAE x 2 drives (5/16-1in,
     # no drive-only category any more) = 24 SAE. 35 + 24 + 2 caps = 61
     # pieces total.
-    n_metric = (len(PARAMS["metric_mm_3_8in_only"])
-                + len(PARAMS["metric_mm"]) * len(PARAMS["drives"])
-                + len(PARAMS["metric_mm_1_2in_only"]))
-    n_sae = len(PARAMS["sae_frac_32nds"]) * len(PARAMS["drives"])
-    expected = n_metric + n_sae + 2
+    expected = len(list(_middle_piece_specs(PARAMS))) + 2
     print("generated %d pieces (expected %d)" % (len(pieces), expected))
     assert len(pieces) == expected == 61
 
