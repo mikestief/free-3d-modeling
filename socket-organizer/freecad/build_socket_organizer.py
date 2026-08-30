@@ -2,11 +2,12 @@
 """
 Socket organizer - parametric generator for FreeCAD.
 
-Modular, interlinking socket holder. Metric (8-25mm) and SAE (5/16"-1")
+Modular, interlinking socket holder. Metric (6-25mm) and SAE (5/16"-1")
 sockets, one middle piece per size/drive plus a start and end cap. Sizes
-8-19mm / 5/16"-3/4" come in both 3/8" and 1/2" drive; the larger sizes
-(20-25mm / 13/16"-1") are 1/2" drive only, matching real socket sets (3/8"
-drive sets don't typically go that large). Each socket stands on a molded
+8-22mm / 5/16"-1" come in both 3/8" and 1/2" drive; 6-7mm are 3/8" drive
+only (below what 1/2" drive needs), and 23-25mm are 1/2" drive only
+(matching real socket sets - 3/8" drive sets don't typically go that
+large). Each socket stands on a molded
 post sized to its drive square - friction on the post corners holds it
 upright, no magnet, no stick. Pieces snap together with a vertical
 dovetail (press down to seat, lift straight up to remove) so any single
@@ -21,7 +22,7 @@ Headless (no GUI needed)::
 Outputs land in ./exports as STEP, STL and 3MF.
 
 Print the fit coupons (post_coupon_3-8in.stl, post_coupon_1-2in.stl,
-dovetail_coupon.stl) before committing to the full 52-piece set.
+dovetail_coupon.stl) before committing to the full 61-piece set.
 
 Copyright (c) 2026 Oxidized Apps, LLC
 SPDX-License-Identifier: MIT
@@ -181,15 +182,24 @@ PARAMS = {
     "cap_round_r":     8.0,   # radius of the closed rounded end
 
     # --- sizes covered --------------------------------------------------------
-    # 8-19mm / 5/16-3/4in come in both drives (existing, unchanged). 20-25mm /
-    # 13/16-1in are 1/2" drive only - real socket sets don't typically sell
-    # those sizes in 3/8" drive - see _middle_piece_specs, which yields the
-    # "_1_2in_only" tables for "1-2in" drive alone rather than iterating
-    # p["drives"] for them.
-    "metric_mm":       list(range(8, 20)),               # 8..19 inclusive, both drives
-    "metric_mm_1_2in_only": list(range(20, 26)),          # 20..25 inclusive, 1/2in only
-    "sae_frac_32nds":  [10, 12, 14, 16, 18, 20, 22, 24],  # 5/16..3/4 in 1/32nds, both drives
-    "sae_frac_32nds_1_2in_only": [26, 28, 30, 32],        # 13/16..1in in 1/32nds, 1/2in only
+    # Corrected against the user's actual photographed socket trays (two
+    # Craftsman sets), which don't match the previous assumed ranges: their
+    # 3/8" drive metric tray runs 6-22mm (not 8-19mm - missing 6/7mm
+    # entirely, and 20-22mm turned out to exist in 3/8" drive too, not just
+    # 1/2"), and their 3/8" drive SAE tray runs 5/16"-1" (not 5/16"-3/4" -
+    # 13/16" through 1" also exist in 3/8" drive). Their 1/2" drive metric
+    # tray goes up to 36mm but the existing 25mm cap here is being kept
+    # deliberately (user confirmed no change needed at that end).
+    #
+    # Three categories per system now (see _middle_piece_specs):
+    # 3/8"-drive-only (small sizes below what 1/2" drive needs), common to
+    # both drives, and 1/2"-drive-only (large sizes 3/8" drive sets don't
+    # carry). SAE no longer has a drive-only category at all - every SAE
+    # size the 1/2" tray has, the 3/8" tray has too.
+    "metric_mm_3_8in_only":  [6, 7],                      # 6..7 inclusive, 3/8in only
+    "metric_mm":       list(range(8, 23)),                # 8..22 inclusive, both drives
+    "metric_mm_1_2in_only": list(range(23, 26)),          # 23..25 inclusive, 1/2in only
+    "sae_frac_32nds":  [10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32],  # 5/16..1in in 1/32nds, both drives
     "drives":          ["3-8in", "1-2in"],
 
     # --- printer --------------------------------------------------------------
@@ -225,7 +235,7 @@ FUSE_EMBED = 0.1
 # scale of the feature involved (millimeters)" as an earlier version of
 # this comment claimed. That claim was wrong: verified live, distance-based
 # filtering cannot reliably separate that defect from ordinary tessellation
-# noise, because their measured ranges overlap. 50 of 52 pieces (every
+# noise, because their measured ranges overlap. 59 of 61 pieces (every
 # middle piece) would silently pass watertight() with FUSE_EMBED=0; only
 # the 2 caps still fail, and only via a different, tolerance-independent
 # check (NON-MANIFOLD/not-solid) that happens to catch the caps' specific
@@ -278,14 +288,18 @@ COUNTER_WIDTH_FLOOR = 1.0
 #
 # estimated_socket_od_mm() linearly interpolates/extrapolates between these
 # two points to estimate OD for any nominal size (mm) - used to find the
-# TRUE worst case across the whole 20-25mm / 13/16-1in size range, not just
-# assume the largest metric size (25mm, OD 35mm exactly per the measured
-# point) is automatically the tightest. It isn't: converting 1in SAE to its
+# TRUE worst case across the whole size range, not just assume the largest
+# metric size (25mm, OD 35mm exactly per the measured point) is
+# automatically the tightest. It isn't: converting 1in SAE to its
 # metric-equivalent bore (25.4mm) and running it through the same line
 # predicts an OD of ~35.67mm, slightly LARGER than 25mm's measured 35mm -
-# see check_socket_od_clearance(), which sweeps every size in
-# PARAMS["metric_mm_1_2in_only"] and PARAMS["sae_frac_32nds_1_2in_only"]
-# through this model rather than hardcoding an assumed worst case.
+# see check_socket_od_clearance(), which sweeps every distinct size in the
+# whole table (PARAMS["metric_mm_3_8in_only"]/["metric_mm"]/
+# ["metric_mm_1_2in_only"] and PARAMS["sae_frac_32nds"]) through this model
+# rather than hardcoding an assumed worst case. The sweep is cheap (a few
+# cylinder/box booleans per size, not full piece geometry), so it costs
+# nothing to check every size rather than trying to guess in advance which
+# subset holds the worst case.
 SOCKET_OD_POINTS_MM = [(22.0, 30.0), (25.0, 35.0)]
 
 # Minimum acceptable clearance (mm) between the estimated widest socket body
@@ -319,11 +333,13 @@ def estimated_socket_od_mm(nominal_mm):
     """Linear estimate of a socket's outer diameter (mm) from its nominal
     bore size (mm), anchored on the two real measured points in
     SOCKET_OD_POINTS_MM. Not a physical model - sockets aren't actually
-    linear in OD-vs-bore across their whole range - but a reasonable local
-    estimate near the two measured points (22mm, 25mm), which is exactly
-    the range (20-25mm metric, 13/16-1in SAE) this is used for. See
-    SOCKET_OD_POINTS_MM's comment for why this beats hardcoding a single
-    assumed worst-case size."""
+    linear in OD-vs-bore across their whole range - but a reasonable
+    estimate near the two measured points (22mm, 25mm) that stays
+    conservative (an underestimate, if anything) further out, which is
+    good enough for check_socket_od_clearance()'s sweep across the whole
+    size table (6-25mm metric, 5/16-1in SAE). See SOCKET_OD_POINTS_MM's
+    comment for why this beats hardcoding a single assumed worst-case
+    size."""
     (x0, y0), (x1, y1) = SOCKET_OD_POINTS_MM
     slope = (y1 - y0) / (x1 - x0)
     return y0 + slope * (nominal_mm - x0)
@@ -406,7 +422,7 @@ def make_post(p, drive):
     with the base's top face over the post's whole footprint) - the same
     OCC pathology documented in emboss_label's docstring, and it produced
     real fallout here: fine_mesh flagged every one of the 42 generated
-    pieces (the size table at the time - since grown to 52; the underlying
+    pieces (the size table at the time - since grown to 61; the underlying
     defect and fix are unchanged) as `mesh self-intersects` until this and
     make_dovetail_tail's matching fix were added. NOTE: that mesh
     self-intersection distance is NOT a reliable way to catch this defect
@@ -807,18 +823,30 @@ def make_cap(p, side):
 # --------------------------------------------------------------------------
 
 def _middle_piece_specs(p):
-    """Yields (name, drive, label_text) for all 50 middle pieces (not the
+    """Yields (name, drive, label_text) for all 59 middle pieces (not the
     2 caps, which have no label). Single source of truth for the
     name/drive/label mapping, shared by generate_all_parts and (through
     it) generate_all, so the two can't silently diverge on which pieces
     exist or what they're named.
 
-    8-19mm / 5/16-3/4in each get a piece in both p["drives"] (existing,
-    unchanged: 12 metric x 2 + 8 SAE x 2 = 40 pieces). 20-25mm /
-    13/16-1in - real socket sets don't typically sell those sizes in 3/8"
-    drive - get a piece in "1-2in" only (new: 6 metric + 4 SAE = 10
-    pieces), never iterating p["drives"] for them. 40 + 10 = 50 middle
-    pieces total."""
+    Three size categories, matching the user's photographed socket trays
+    (their 3/8" drive tray runs 6-22mm metric / 5/16-1in SAE; their 1/2"
+    drive tray runs the same low end up through 25mm metric, with no
+    SAE-only sizes at the top):
+
+      - metric_mm_3_8in_only (6-7mm): below what 1/2" drive needs, so
+        "3-8in" only.
+      - metric_mm (8-22mm) and sae_frac_32nds (5/16-1in): common to both
+        drives, so one piece per size per drive.
+      - metric_mm_1_2in_only (23-25mm): real socket sets don't typically
+        sell sizes that large in 3/8" drive, so "1-2in" only. SAE has no
+        equivalent drive-only category any more - the user's 3/8" tray
+        goes all the way to 1in, same as their 1/2" tray.
+
+    2x1 + 15x2 + 3x1 = 35 metric pieces; 12x2 = 24 SAE pieces (all
+    common). 35 + 24 = 59 middle pieces total."""
+    for mm in p["metric_mm_3_8in_only"]:
+        yield "metric_%dmm_%s" % (mm, "3-8in"), "3-8in", str(mm)
     for mm in p["metric_mm"]:
         for drive in p["drives"]:
             yield "metric_%dmm_%s" % (mm, drive), drive, str(mm)
@@ -829,14 +857,10 @@ def _middle_piece_specs(p):
         key = sae_key(n32)
         for drive in p["drives"]:
             yield "sae_%s_%s" % (key, drive), drive, label
-    for n32 in p["sae_frac_32nds_1_2in_only"]:
-        label = sae_label(n32)
-        key = sae_key(n32)
-        yield "sae_%s_%s" % (key, "1-2in"), "1-2in", label
 
 
 def generate_all_parts(p):
-    """Returns {name: (body_without_label, label_only)} for the 50 middle
+    """Returns {name: (body_without_label, label_only)} for the 59 middle
     pieces only - NOT the 2 caps, which never call emboss_label (see
     make_cap) and so have nothing to split. This is the basis for the
     multi-color _body/_label export pair."""
@@ -845,7 +869,7 @@ def generate_all_parts(p):
 
 
 def generate_all_parts_multicolor(p, parts):
-    """Returns {name: (body_without_label, label_only)} for the 50 middle
+    """Returns {name: (body_without_label, label_only)} for the 59 middle
     pieces, for the UNFUSED multi-color 3MF export specifically
     (export_multicolor_3mf's caller in run()) - NOT for the fused
     single-color path, which must keep using generate_all_parts's
@@ -993,8 +1017,8 @@ def watertight(shape, label):
     What this does NOT reliably catch: a zero-gap tangent fuse (e.g.
     FUSE_EMBED reverted to 0 on make_post/make_dovetail_tail). That defect's
     mesh self-intersection distance (~0.004-0.014mm, measured live) sits
-    inside SELF_INTERSECT_TOL's tessellation-noise-filtering range for 50 of
-    52 pieces (every middle piece) - only the 2 caps happen to still fail
+    inside SELF_INTERSECT_TOL's tessellation-noise-filtering range for 59 of
+    61 pieces (every middle piece) - only the 2 caps happen to still fail
     here, and via the tolerance-independent NON-MANIFOLD/not-solid checks,
     not the distance one. Mesh-tessellation signals are a downstream proxy
     for geometry, not a geometric fact, and this defect class sits right in
@@ -1163,7 +1187,7 @@ def check_label_legibility(p, parts):
     Reuses each distinct text's already-built label solid straight from
     `parts` (the {name: (body, label)} dict generate_all_parts() returns,
     built once in run() before any self-check runs) for check (1), rather
-    than calling emboss_label() again for all 30 distinct texts -
+    than calling emboss_label() again for all 32 distinct texts -
     confirmed live to reconstruct bit-identical geometry, so rebuilding it
     a second time here was pure duplicated work, not a correctness need.
     Check (2) is genuinely new work, not a rebuild of anything already in
@@ -1218,7 +1242,7 @@ def check_fuse_overlaps(p):
     FUSE_EMBED-dependent boolean in the design. make_post and
     make_dovetail_tail's geometry does not depend on socket size (only
     drive, or nothing at all), so one check per drive plus one for the
-    tail covers every one of the 50 middle pieces - they all build the
+    tail covers every one of the 59 middle pieces - they all build the
     same post/tail geometry that these checks exercise directly. Both caps
     are checked individually since 'start' and 'end' cut opposite edges."""
     issues = []
@@ -1241,11 +1265,14 @@ def check_fuse_overlaps(p):
 
 def check_socket_od_clearance(p):
     """Permanent regression guard for the base footprint resize (see
-    PARAMS["base_w"]/["base_d"]'s comment) - confirms every 1/2"-drive-only
-    large size (20-25mm metric, 13/16-1in SAE) has its estimated socket
-    body clear the base's own outer edge by at least OD_CLEARANCE_FLOOR, in
-    every direction, using real OCC B-rep booleans rather than the
-    on-paper distance arithmetic in PARAMS's comment.
+    PARAMS["base_w"]/["base_d"]'s comment) - confirms every size in the
+    whole table (metric 6-25mm across all three metric categories, SAE
+    5/16-1in) has its estimated socket body clear the base's own outer
+    edge by at least OD_CLEARANCE_FLOOR, in every direction, using real OCC
+    B-rep booleans rather than the on-paper distance arithmetic in PARAMS's
+    comment. The base footprint doesn't depend on drive, so this sweeps
+    every distinct size once rather than trying to guess which
+    drive-scoping category holds the worst case.
 
     For each size, builds a real Part.makeCylinder probe of the estimated
     OD (see estimated_socket_od_mm/SOCKET_OD_POINTS_MM), centered at the
@@ -1269,10 +1296,10 @@ def check_socket_od_clearance(p):
          OD_CLEARANCE_FLOOR.
 
     Verified live (see this file's development history) that the true
-    worst case across the whole large-size range is NOT the largest metric
-    size (25mm, measured OD 35mm exactly) but the 1in SAE size (estimated
-    OD ~35.67mm via the linear model, converting 25.4mm nominal through
-    the same two measured points) - which is exactly why this sweeps every
+    worst case across the whole table is NOT the largest metric size
+    (25mm, measured OD 35mm exactly) but the 1in SAE size (estimated OD
+    ~35.67mm via the linear model, converting 25.4mm nominal through the
+    same two measured points) - which is exactly why this sweeps every
     size instead of hardcoding one assumed worst case."""
     issues = []
     cx, cy = p["base_w"] / 2.0, p["base_d"] * 0.62
@@ -1281,10 +1308,11 @@ def check_socket_od_clearance(p):
     tail = make_dovetail_tail(p)
     groove = make_dovetail_groove_cutter(p)
 
-    sizes_mm = [("metric %dmm" % mm, float(mm))
-                for mm in p["metric_mm_1_2in_only"]]
+    metric_sizes = (p["metric_mm_3_8in_only"] + p["metric_mm"]
+                    + p["metric_mm_1_2in_only"])
+    sizes_mm = [("metric %dmm" % mm, float(mm)) for mm in metric_sizes]
     sizes_mm += [("sae %s" % sae_label(n32), n32 / 32.0 * 25.4)
-                 for n32 in p["sae_frac_32nds_1_2in_only"]]
+                 for n32 in p["sae_frac_32nds"]]
 
     worst_label, worst_margin = None, None
     for size_label, nominal_mm in sizes_mm:
@@ -1484,7 +1512,7 @@ def check_multicolor_3mf_structure(path):
 
 def run():
     doc = App.newDocument("socket_organizer")
-    # Build the 50 middle pieces' (body, label) parts once, then derive the
+    # Build the 59 middle pieces' (body, label) parts once, then derive the
     # fused single-solid pieces from them locally (same as generate_all(p)
     # does internally) instead of also calling generate_all_parts(p) again
     # later for the multi-color export - that would rebuild every middle
@@ -1493,16 +1521,17 @@ def run():
     pieces = {name: body.fuse(label) for name, (body, label) in parts.items()}
     pieces["cap_start"] = make_cap(PARAMS, "start")
     pieces["cap_end"] = make_cap(PARAMS, "end")
-    # 12 metric x 2 drives + 6 metric (20-25mm, 1/2in only) = 30 metric.
-    # 8 SAE x 2 drives + 4 SAE (13/16-1in, 1/2in only) = 20 SAE. 30 + 20 + 2
-    # caps = 52 pieces total.
-    n_metric = (len(PARAMS["metric_mm"]) * len(PARAMS["drives"])
+    # 2 metric (6-7mm, 3/8in only) + 15 metric x 2 drives (8-22mm) + 3
+    # metric (23-25mm, 1/2in only) = 35 metric. 12 SAE x 2 drives (5/16-1in,
+    # no drive-only category any more) = 24 SAE. 35 + 24 + 2 caps = 61
+    # pieces total.
+    n_metric = (len(PARAMS["metric_mm_3_8in_only"])
+                + len(PARAMS["metric_mm"]) * len(PARAMS["drives"])
                 + len(PARAMS["metric_mm_1_2in_only"]))
-    n_sae = (len(PARAMS["sae_frac_32nds"]) * len(PARAMS["drives"])
-             + len(PARAMS["sae_frac_32nds_1_2in_only"]))
+    n_sae = len(PARAMS["sae_frac_32nds"]) * len(PARAMS["drives"])
     expected = n_metric + n_sae + 2
     print("generated %d pieces (expected %d)" % (len(pieces), expected))
-    assert len(pieces) == expected == 52
+    assert len(pieces) == expected == 61
 
     print("\n--- multi-color part-reconstruction spot-check ---")
     # Confirms body_without_label U label_only reconstructs exactly the
@@ -1566,15 +1595,15 @@ def run():
               % (PARAMS["base_h"], PARAMS["base_w"], COUNTER_WIDTH_FLOOR))
 
     print("\n--- socket OD clearance self-check "
-          "(real cylinder probes, largest 1/2in-only sizes) ---")
+          "(real cylinder probes, every size in the table) ---")
     od_clearance_issues = check_socket_od_clearance(PARAMS)
     if od_clearance_issues:
         for issue in od_clearance_issues:
             print("OD-CLEARANCE: %s" % issue)
     else:
-        print("every 20-25mm / 13/16-1in socket's estimated OD clears the "
-              "base footprint (and stays clear of the dovetail tail/"
-              "groove) by more than the %.2fmm floor"
+        print("every 6-25mm metric / 5/16-1in SAE socket's estimated OD "
+              "clears the base footprint (and stays clear of the dovetail "
+              "tail/groove) by more than the %.2fmm floor"
               % OD_CLEARANCE_FLOOR)
 
     printability_issues = []
@@ -1611,7 +1640,7 @@ def run():
     assert not mesh_issues, "mesh/watertight check failed, see report above"
 
     out_dir = os.path.join(_script_dir(), "exports")
-    # The 50 middle pieces skip .3mf here (formats=("step", "stl")):
+    # The 59 middle pieces skip .3mf here (formats=("step", "stl")):
     # <name>_multicolor.3mf below already supersedes the combined .3mf for
     # anyone with a multi-color printer, and <name>.step/.stl cover
     # single-color printing, so a plain combined <name>.3mf would be pure
@@ -1687,9 +1716,9 @@ def run():
     print("\n--- multi-color 3MF structure spot-check "
           "(2 objects / 2 items expected) ---")
     # Reuses the same two representative piece names as the
-    # part-reconstruction spot-check above, rather than the full 50, for the
+    # part-reconstruction spot-check above, rather than the full 59, for the
     # same reason check_post_fit only probes a couple of representative
-    # pieces instead of all 52: the geometry that determines object/item
+    # pieces instead of all 61: the geometry that determines object/item
     # count here (Mesh.export() being handed a 2-element list) does not vary
     # by piece, only the file being real and on disk does. Skips a name if
     # its multicolor export already failed above - there is no file to open.
