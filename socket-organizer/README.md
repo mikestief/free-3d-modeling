@@ -9,8 +9,8 @@ disturbing its neighbors, so you build out exactly the sockets you own.
 
 | | |
 |---|---|
-| Size | 26 × 32 × 21 mm per piece (base + post, before the socket itself) |
-| Print time | Small parts — roughly 15–25 min per piece on a typical FDM printer; total time scales with however many of the 42 pieces you print, and several batch easily on one plate |
+| Size | 43 × 53 × 21 mm per piece (base + post, before the socket itself) |
+| Print time | Small parts — roughly 15–25 min per piece on a typical FDM printer; total time scales with however many of the 52 pieces you print, and several batch easily on one plate |
 | Material | A few grams per piece in PLA or PETG |
 | Supports | None |
 | Bed needed | Any — pieces are small and print individually or in batches |
@@ -18,10 +18,13 @@ disturbing its neighbors, so you build out exactly the sockets you own.
 
 ## Sizes
 
-- **Metric**: 8–19mm (12 sizes)
-- **SAE**: 5/16"–3/4" in 1/16" steps (8 sizes)
-- Every size in both **3/8"** and **1/2"** drive
-- 40 middle pieces + 2 end caps = 42 pieces total, all sharing one dovetail
+- **Metric**: 8–19mm in both drives (12 sizes), plus 20–25mm in 1/2" drive
+  only (6 sizes)
+- **SAE**: 5/16"–3/4" in 1/16" steps in both drives (8 sizes), plus
+  13/16"–1" in 1/2" drive only (4 sizes)
+- The larger sizes (20mm+/13/16"+) are 1/2" drive only, matching real
+  socket sets — 3/8" drive sets don't typically go that large
+- 50 middle pieces + 2 end caps = 52 pieces total, all sharing one dovetail
   interface — mix metric, SAE, and drive size in any order
 
 A row is any number of middle pieces snapped together, with one cap on
@@ -42,7 +45,7 @@ Three small coupons ship alongside the full set:
   two pre-joined pieces, to check the snap seats and releases cleanly
 
 STL and STEP versions are alongside them in
-[`freecad/exports/`](freecad/exports/), along with all 42 pieces.
+[`freecad/exports/`](freecad/exports/), along with all 52 pieces.
 
 If a post is too loose or tight, adjust `post_af_undersize` in
 [`freecad/build_socket_organizer.py`](freecad/build_socket_organizer.py) and
@@ -52,7 +55,7 @@ re-run. If the dovetail snap is too loose or tight, adjust `dt_clearance`.
 
 Every middle piece's size label (`10`, `5/16`, etc.) can be printed in a
 different filament color from the body on a multi-color printer (Bambu
-AMS, or any similar MMU/AMS setup). For each of the 40 middle pieces
+AMS, or any similar MMU/AMS setup). For each of the 50 middle pieces
 (not the 2 end caps, which have no label), `exports/` includes:
 
 - `<name>_multicolor.3mf` — **one file**, containing the body and the
@@ -69,7 +72,7 @@ AMS, or any similar MMU/AMS setup). For each of the 40 middle pieces
 
 The plain `<name>.stl` / `.step` files (the fused single-color piece) are
 unchanged and still there for single-color printing. There's no plain
-`<name>.3mf` for the 40 middle pieces — `<name>_multicolor.3mf` above
+`<name>.3mf` for the 50 middle pieces — `<name>_multicolor.3mf` above
 supersedes it for anyone with a multi-color printer, and it's redundant
 with `.stl`/`.step` for single-color printing. If you have a multi-color
 printer but want a single-color result, use `<name>_multicolor.3mf` and
@@ -85,7 +88,7 @@ freecadcmd build_socket_organizer.py
 ```
 
 Needs FreeCAD 1.0+. Outputs land in `exports/` as STEP and STL for every
-piece, plus a plain 3MF for the 2 end caps and 3 coupons (the 40 middle
+piece, plus a plain 3MF for the 2 end caps and 3 coupons (the 50 middle
 pieces get a multi-color 3MF instead — see above). Every run reports fit,
 structural, printability and mesh-health checks — see the repo root
 README for what each one means.
