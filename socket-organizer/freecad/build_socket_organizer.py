@@ -301,6 +301,17 @@ SOCKET_OD_POINTS_MM = [(22.0, 30.0), (25.0, 35.0)]
 # 2.64mm). 1.5mm sits below that with real, if not huge, margin (~35%),
 # the same "floor below the measured worst case with room for a real
 # regression to still be caught" pattern as COUNTER_WIDTH_FLOOR above.
+#
+# Unlike COUNTER_WIDTH_FLOOR (grounded in an independent physical fact -
+# nozzle diameter - not just the current design's own numbers), this floor
+# has no such external anchor: SOCKET_OD_POINTS_MM is only two measured
+# points, and estimated_socket_od_mm() is a linear guess between/near them,
+# not a physical law. 1.5mm is chosen to absorb ordinary FDM dimensional
+# tolerance (typically a few tenths of a mm) many times over, plus a real
+# buffer for that OD-model uncertainty - not just "smaller than today's
+# margin." If SOCKET_OD_POINTS_MM is ever refined with more measured sizes,
+# revisit whether 1.5mm is still the right floor for the (hopefully
+# tighter) resulting estimate.
 OD_CLEARANCE_FLOOR = 1.5
 
 
