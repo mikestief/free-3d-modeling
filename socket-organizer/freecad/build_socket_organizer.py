@@ -76,11 +76,11 @@ PARAMS = {
     # corrected that: "4" (as in "14" and "3/4") is tighter than "9"/"6" at
     # both sizes, and "8" (as in "8", "18") is close behind - narrower
     # digit than either "9" or "6" originally cited. At 4.0mm with Arial
-    # Bold "4"'s counter measures 0.8515mm (vs. ~0.988-0.991mm for "9"/"6",
+    # Bold "4"'s counter measures 0.8497mm (vs. ~0.988-0.991mm for "9"/"6",
     # ~0.892mm for "8"), only ~2.1x a typical 0.4mm FDM nozzle - not enough
     # margin for 2 clean perimeter walls plus a real gap between them,
     # which is exactly what "blobbing shut" looks like. At 6.0mm the same
-    # "4" counter measures 1.2772mm, ~3.2x the nozzle diameter (vs.
+    # "4" counter measures 1.2745mm, ~3.2x the nozzle diameter (vs.
     # ~1.482-1.486mm for "9"/"6", ~1.338mm for "8"), with the digit stroke
     # itself (measured on "1", clear of any foot/serif) going from 0.72mm
     # at 4.0mm to 1.07mm at 6.0mm - both comfortably above the
@@ -234,10 +234,10 @@ SELF_INTERSECT_TOL = 2 * LINEAR_DEFLECTION
 # half a nozzle width, i.e. 1.0mm total (2.5x nozzle diameter). Verified
 # against this file's own history: at label_h=4.0 (the old, too-small
 # value that produced the photographed blobby digits) the narrowest
-# counter across the whole size table measures 0.8515mm ("4", as in "14"
+# counter across the whole size table measures 0.8497mm ("4", as in "14"
 # and "3/4") - below this floor, as it should be, since that is the exact
 # defect being guarded against. At label_h=6.0 (current) it measures
-# 1.2772mm, also "4" - above the floor with real, if not huge, margin
+# 1.2745mm, also "4" - above the floor with real, if not huge, margin
 # (~28%).
 COUNTER_WIDTH_FLOOR = 1.0
 
