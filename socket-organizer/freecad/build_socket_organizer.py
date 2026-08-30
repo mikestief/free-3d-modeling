@@ -64,27 +64,41 @@ PARAMS = {
 
     # --- label --------------------------------------------------------------
     # label_h was 4.0mm; raised to 6.0mm after a real printed sample (photo
-    # provided) showed curved digit strokes ("9", "6") blobbing shut rather
-    # than resolving as open loops. Measured directly (build a text_solid()
-    # for "9"/"6" and take the bbox of the smallest-area interior wire, i.e.
-    # the counter/aperture that has to stay open on the printer): at 4.0mm
-    # with Arial Bold the counter's narrower dimension was ~0.99mm, only
-    # ~2.5x a typical 0.4mm FDM nozzle - not enough margin for 2 clean
-    # perimeter walls plus a real gap between them, which is exactly what
-    # "blobbing shut" looks like. At 6.0mm the same counter measures
-    # ~1.48-1.62mm, ~3.7-4.0x the nozzle diameter, with the digit stroke
+    # provided) showed curved digit strokes blobbing shut rather than
+    # resolving as open loops. The original investigation here measured "9"
+    # and "6" by hand (build a text_solid() for each and take the bbox of
+    # the smallest-area interior wire, i.e. the counter/aperture that has to
+    # stay open on the printer) and used those as the worst case. A later
+    # automated sweep of every digit actually used in the size table (see
+    # narrowest_counter_width() / check_label_legibility(), which measures
+    # every distinct label text's real narrowest counter via horizontal AND
+    # vertical cross-section - not the bbox proxy used by hand here)
+    # corrected that: "4" (as in "14" and "3/4") is tighter than "9"/"6" at
+    # both sizes, and "8" (as in "8", "18") is close behind - narrower
+    # digit than either "9" or "6" originally cited. At 4.0mm with Arial
+    # Bold "4"'s counter measures 0.8515mm (vs. ~0.988-0.991mm for "9"/"6",
+    # ~0.892mm for "8"), only ~2.1x a typical 0.4mm FDM nozzle - not enough
+    # margin for 2 clean perimeter walls plus a real gap between them,
+    # which is exactly what "blobbing shut" looks like. At 6.0mm the same
+    # "4" counter measures 1.2772mm, ~3.2x the nozzle diameter (vs.
+    # ~1.482-1.486mm for "9"/"6", ~1.338mm for "8"), with the digit stroke
     # itself (measured on "1", clear of any foot/serif) going from 0.72mm
     # at 4.0mm to 1.07mm at 6.0mm - both comfortably above the
     # 2-perimeter-wall threshold. Verdana Bold was
     # also measured as a "designed for small-size legibility" alternative:
-    # its counters are marginally larger (~1.62mm vs ~1.48mm for "9" at
-    # 6.0mm) but it renders meaningfully wider, and the longest label in the
-    # whole size table ("11/16") at 6.0mm only leaves ~0.59mm clearance per
-    # side inside base_w=26.0mm in Verdana Bold vs. ~3.87mm per side in
-    # Arial Bold - not worth trading a marginal counter gain for a much
-    # tighter, more fragile X-fit margin. Arial Bold (already sans-serif)
-    # stays the font; 6.0mm is the fix. See check_label_fit() for the
-    # automated version of the Z/X fit check described above.
+    # its own worst-case counter is "8" at ~1.24mm at 6.0mm - about the same
+    # as Arial Bold's worst case ("4" at ~1.28mm), not "marginally larger"
+    # as an earlier version of this comment claimed by comparing only "9"
+    # in both fonts - but it renders meaningfully wider, and the longest
+    # label in the whole size table ("11/16") at 6.0mm only leaves ~0.59mm
+    # clearance per side inside base_w=26.0mm in Verdana Bold vs. ~3.87mm
+    # per side in Arial Bold - not worth trading a wash on counter size for
+    # a much tighter, more fragile X-fit margin. Arial Bold (already
+    # sans-serif) stays the font; 6.0mm is the fix. See
+    # check_label_legibility() for the automated version of both the Z/X
+    # fit check and the counter-width check described above -
+    # COUNTER_WIDTH_FLOOR documents the 1.0mm regression floor chosen from
+    # these same measurements.
     "label_h":         6.0,   # embossed text height (font size)
     "label_depth":     0.6,   # how far the text stands proud
     # label_z was 4.0 (tuned for the old label_h=4.0). At label_h=6.0 that
@@ -92,7 +106,7 @@ PARAMS = {
     # base_h before the wall's top edge - workable but thin. Lowered to 3.5
     # so the larger label is centered with real margin on both ends: worst
     # case across every label in the size table (measured via
-    # check_label_fit/emboss_label bbox) is top_margin=0.947mm,
+    # check_label_legibility/emboss_label bbox) is top_margin=0.947mm,
     # bottom_margin=3.340mm - both comfortably positive, well inside
     # [0, base_h]. The post lives at Z>=base_h (see make_post's final
     # translate), so it never shares Z range with the label regardless of
@@ -200,6 +214,32 @@ FUSE_EMBED = 0.1
 # doesn't cry wolf on every build; it is not a defense against zero-gap
 # fuses of any kind.
 SELF_INTERSECT_TOL = 2 * LINEAR_DEFLECTION
+
+# Minimum acceptable width (mm) for the narrowest interior counter/aperture
+# across every distinct label text in the size table - see
+# narrowest_counter_width() and check_label_legibility(). This is the
+# automated regression guard for the exact defect a real printed sample
+# (photo) showed before PARAMS["label_h"] was raised from 4.0mm to 6.0mm: a
+# digit's interior counter printing too narrow to resolve as an open loop,
+# blobbing shut into a solid blob instead. check_label_legibility's other
+# half (bbox placement) cannot catch this - a label can stay perfectly
+# in-bounds while a future label_h/font change shrinks a counter back down
+# to the photographed defect, and only a real measurement of what is
+# happening INSIDE the glyph's own silhouette can.
+#
+# Derivation: 2 perimeter walls at a conservative 0.4mm nozzle diameter
+# need 0.8mm of solid material to print at all; on top of that the opening
+# between them needs enough real, non-touching air gap to resolve as a
+# genuine hole rather than the two walls fusing together - roughly another
+# half a nozzle width, i.e. 1.0mm total (2.5x nozzle diameter). Verified
+# against this file's own history: at label_h=4.0 (the old, too-small
+# value that produced the photographed blobby digits) the narrowest
+# counter across the whole size table measures 0.8515mm ("4", as in "14"
+# and "3/4") - below this floor, as it should be, since that is the exact
+# defect being guarded against. At label_h=6.0 (current) it measures
+# 1.2772mm, also "4" - above the floor with real, if not huge, margin
+# (~28%).
+COUNTER_WIDTH_FLOOR = 1.0
 
 
 def _script_dir():
@@ -369,10 +409,13 @@ def make_dovetail_groove_cutter(p):
 # Arial Bold stays first choice - already sans-serif, and measured against
 # Verdana Bold (a font specifically designed for small-size on-screen
 # legibility, so a reasonable candidate to check) as part of the label_h
-# fix above: Verdana Bold's counters were only marginally larger
-# (~1.62mm vs ~1.48mm for "9" at label_h=6.0) but it renders noticeably
-# wider, leaving the longest label ("11/16") only ~0.59mm clearance per
-# side inside base_w=26.0mm vs. Arial Bold's ~3.87mm - not a good trade.
+# fix above: Verdana Bold's own worst-case counter ("8", ~1.24mm at
+# label_h=6.0) is about the same as Arial Bold's own worst case ("4",
+# ~1.28mm) - not "marginally larger" as an earlier version of this comment
+# claimed by comparing only digit "9" in both fonts - but Verdana renders
+# noticeably wider, leaving the longest label ("11/16") only ~0.59mm
+# clearance per side inside base_w=26.0mm vs. Arial Bold's ~3.87mm - not a
+# good trade for a wash on counter size.
 # See PARAMS['label_h']'s comment for the full measurement.
 _FONT_CANDIDATES = [
     "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
@@ -394,6 +437,104 @@ def text_solid(txt, font, size, thickness):
     faces = [Part.Face(w) for group in shapes for w in group]
     comp = Part.Compound(faces)
     return comp.extrude(App.Vector(0, 0, thickness))
+
+
+def _hole_cross_section_width(face, axis, samples=48):
+    """Widest real cross-section of `face` measured perpendicular to
+    `axis`, via exact boolean intersection with a thin scan strip - not a
+    bounding-box proxy. `axis="y"` sweeps `samples` horizontal strips
+    across the face's own Y range and measures each one's X extent: a
+    literal "horizontal cross-section slice ... gap between solid
+    segments" width, since `face` here IS the counter/hole shape itself -
+    its width at a given slice is exactly the void gap the surrounding ink
+    has to keep open there, the thing a nozzle tracing that Z-layer
+    actually has to resolve. `axis="x"` is the same idea rotated 90
+    degrees, for the vertical direction.
+
+    Not the same measurement as `face.BoundBox.XLength`: the box's
+    X-extent is the distance between the shape's overall leftmost and
+    rightmost points, which need not occur at the same Y (an italic or
+    lopsided counter, for instance) - this instead asks "how wide is the
+    shape when actually sliced at each of these heights". For the roughly
+    convex, upright digit counters this file's font (Arial Bold) produces,
+    the two numbers land within a thousandth of a mm of each other -
+    confirmed live - but this is the real measurement, not a proxy that
+    merely happens to agree with one.
+    """
+    bb = face.BoundBox
+    eps = 1e-4
+    best = 0.0
+    if axis == "y":
+        lo, hi = bb.YMin, bb.YMax
+    else:
+        lo, hi = bb.XMin, bb.XMax
+    for i in range(samples):
+        pos = lo + (hi - lo) * (i + 0.5) / samples
+        if axis == "y":
+            strip = Part.makePlane(bb.XLength + 2, eps,
+                                    App.Vector(bb.XMin - 1, pos - eps / 2.0, 0))
+        else:
+            strip = Part.makePlane(eps, bb.YLength + 2,
+                                    App.Vector(pos - eps / 2.0, bb.YMin - 1, 0))
+        inter = face.common(strip)
+        if inter.Area > 1e-9:
+            w = (inter.BoundBox.XLength if axis == "y"
+                 else inter.BoundBox.YLength)
+            if w > best:
+                best = w
+    return best
+
+
+def narrowest_counter_width(text, font, size):
+    """Real measured width (mm) of the tightest interior counter/aperture
+    across every character of `text`, or None if no character in `text`
+    encloses one at all (e.g. "1", "12", "3/8" have no closed loop in this
+    font).
+
+    Part.makeWireString(text, font, size, 0.0) returns one group of wires
+    per character; a character with a counter (0, 4, 6, 8, 9 among this
+    file's digits - see check_label_legibility's printed report for which
+    ones actually appear in the size table and how wide each measures) has
+    2+ wires: wires[0] is the glyph's OUTER ink silhouette, wires[1:] are
+    its interior hole(s).
+
+    Both of the following were verified live and matter for why this
+    function measures `Part.Face(hole_wire)` directly rather than
+    inspecting the solid text_solid()/emboss_label() actually build:
+    Part.Face(wires[0]) ALONE - which is exactly what those functions
+    construct, one independent Face per wire with no boolean between them
+    - is a solid disc with NO hole cut into it (isInside() at the hole's
+    own center returns True), and Face(wires[0]).common(Face(hole_wire))
+    exactly equals the hole face's own volume (the "hole" region is
+    already fully "inside" wires[0]'s own Face). So the label geometry
+    this file actually prints has no real B-rep hole anywhere in it - what
+    makes a digit's counter print as an open loop instead of a filled
+    blob is a slicer's own even-odd fill rule over the mesh's contour
+    loops at each Z-layer, not this file's OCC solids. Measuring
+    Part.Face(hole_wire) directly - the same shape a slicer's even-odd
+    rule treats as the void - is therefore the real, print-relevant thing
+    to measure, not a stand-in for something else.
+
+    For each hole wire, the counter width is
+    min(cross-section scanned across Y, cross-section scanned across X) -
+    the narrower of the two scan directions, matching PARAMS["label_h"]'s
+    own "the counter's narrower dimension" framing from the original
+    by-hand investigation (see _hole_cross_section_width). The result for
+    `text` is the minimum across every hole in every character - the
+    single tightest spot the whole label text has to resolve.
+    """
+    shapes = Part.makeWireString(text, font, size, 0.0)
+    narrowest = None
+    for group in shapes:
+        if len(group) < 2:
+            continue
+        for hole_wire in group[1:]:
+            hole_face = Part.Face(hole_wire)
+            w = min(_hole_cross_section_width(hole_face, "y"),
+                    _hole_cross_section_width(hole_face, "x"))
+            if narrowest is None or w < narrowest:
+                narrowest = w
+    return narrowest
 
 
 def emboss_label(p, text, embed=None):
@@ -877,34 +1018,63 @@ def check_cap_corner_solid(p, side):
     return None
 
 
-def check_label_fit(p):
-    """Direct geometric guarantee that every embossed label in the size
-    table - built at the current label_h/label_z - stays inside the sloped
-    wall's Z range [0, base_h] and the base's own X footprint [0, base_w].
+def check_label_legibility(p, parts):
+    """Two checks folded into one report, both keyed off every distinct
+    label text in the size table (many piece names share a text - e.g.
+    "12" is both metric_12mm_1-2in and metric_12mm_3-8in - since neither
+    check below depends on drive, only the string does):
 
-    This is the automated version of the by-hand check done when label_h
-    was raised from 4.0mm to 6.0mm (see PARAMS['label_h']'s comment): a
-    larger glyph size changes both how tall the label sits on the wall (it
-    could poke past base_h at the top, or below Z=0 at the bottom) and how
-    wide it renders (the longest label string in the whole table could run
-    outside base_w). Building every label text via emboss_label() and
-    reading its real BoundBox - not eyeballing one representative piece -
-    is what catches a regression here; label height varies slightly by
-    glyph (e.g. "/" reads slightly taller than bare digits), so the
-    per-piece Z margin isn't identical across the table and only a full
-    sweep proves the worst case.
+    1. PLACEMENT - every embossed label, built at the current
+       label_h/label_z, stays inside the sloped wall's Z range
+       [0, base_h] and the base's own X footprint [0, base_w]. This is
+       the automated version of the by-hand check done when label_h was
+       raised from 4.0mm to 6.0mm (see PARAMS['label_h']'s comment): a
+       larger glyph size changes both how tall the label sits on the wall
+       (it could poke past base_h at the top, or below Z=0 at the bottom)
+       and how wide it renders (the longest label string in the whole
+       table could run outside base_w). Reading every distinct label
+       text's real BoundBox - not eyeballing one representative piece -
+       is what catches a regression here; label height varies slightly by
+       glyph (e.g. "/" reads slightly taller than bare digits), so the
+       per-text Z margin isn't identical across the table and only a full
+       sweep proves the worst case.
 
-    Deduplicates by label text (not by piece/drive) since neither
-    label_h/label_z nor emboss_label's geometry depend on drive - only the
-    string does - so checking each distinct text once covers every one of
-    the 40 middle pieces without rebuilding the same label solid twice."""
-    issues = []
+    2. LEGIBILITY - the narrowest interior counter/aperture across every
+       label text's glyphs stays above COUNTER_WIDTH_FLOOR. This is what
+       (1) categorically cannot catch: a label can stay perfectly in
+       bounds while a digit's interior counter shrinks back down to the
+       exact defect a real printed sample (photo) showed - curved strokes
+       blobbing shut into a solid blob instead of resolving as an open
+       loop - because bbox placement has no visibility into what is
+       happening INSIDE the glyph's own silhouette. See
+       narrowest_counter_width() for the real cross-section measurement
+       and COUNTER_WIDTH_FLOOR for the floor's derivation. If label_h or
+       the font is ever tuned again in a way that keeps every label's
+       bbox in-bounds but shrinks a counter back down, this is what
+       catches it - (1) would still pass.
+
+    Reuses each distinct text's already-built label solid straight from
+    `parts` (the {name: (body, label)} dict generate_all_parts() returns,
+    built once in run() before any self-check runs) for check (1), rather
+    than calling emboss_label() again for all 20 distinct texts -
+    confirmed live to reconstruct bit-identical geometry, so rebuilding it
+    a second time here was pure duplicated work, not a correctness need.
+    Check (2) is genuinely new work, not a rebuild of anything already in
+    `parts`: it operates on Part.makeWireString's flat, pre-rotation 2D
+    glyph wires (the same font/size call text_solid() makes internally),
+    not the rotated/positioned/extruded solids `parts` holds - there is
+    nothing there to reuse for it."""
     seen = set()
-    for _, _, label_text in _middle_piece_specs(p):
+    label_by_text = {}
+    for name, _drive, label_text in _middle_piece_specs(p):
         if label_text in seen:
             continue
         seen.add(label_text)
-        bb = emboss_label(p, label_text).BoundBox
+        label_by_text[label_text] = parts[name][1]
+
+    issues = []
+    for label_text, label_shape in sorted(label_by_text.items()):
+        bb = label_shape.BoundBox
         if bb.ZMin < -1e-6 or bb.ZMax > p["base_h"] + 1e-6:
             issues.append(
                 "label %r: Z[%.3f,%.3f] outside wall bounds [0, %.3f]"
@@ -913,6 +1083,26 @@ def check_label_fit(p):
             issues.append(
                 "label %r: X[%.3f,%.3f] outside base width [0, %.3f]"
                 % (label_text, bb.XMin, bb.XMax, p["base_w"]))
+
+    font = pick_font()
+    worst_text, worst_width = None, None
+    for label_text in sorted(label_by_text):
+        width = narrowest_counter_width(label_text, font, p["label_h"])
+        if width is None:
+            continue
+        print("  counter %r: narrowest %.4fmm" % (label_text, width))
+        if worst_width is None or width < worst_width:
+            worst_text, worst_width = label_text, width
+    if worst_width is not None:
+        print("  worst-case counter: %r at %.4fmm (floor %.2fmm)"
+              % (worst_text, worst_width, COUNTER_WIDTH_FLOOR))
+        if worst_width <= COUNTER_WIDTH_FLOOR:
+            issues.append(
+                "label %r: narrowest counter %.4fmm at or below the "
+                "%.2fmm floor - digit counter/aperture too small, would "
+                "blob shut on an FDM printer (the exact defect label_h "
+                "was raised to fix, see PARAMS['label_h'])"
+                % (worst_text, worst_width, COUNTER_WIDTH_FLOOR))
     return issues
 
 
@@ -1160,15 +1350,17 @@ def run():
               "overlap (post/base x%d drives, dovetail tail/base, "
               "cap corner cuts x2)" % len(PARAMS["drives"]))
 
-    print("\n--- label fit self-check (every label text, direct bbox) ---")
-    label_fit_issues = check_label_fit(PARAMS)
-    if label_fit_issues:
-        for issue in label_fit_issues:
-            print("LABEL-FIT: %s" % issue)
+    print("\n--- label legibility self-check "
+          "(bbox placement + counter widths, reusing built parts) ---")
+    label_legibility_issues = check_label_legibility(PARAMS, parts)
+    if label_legibility_issues:
+        for issue in label_legibility_issues:
+            print("LABEL-LEGIBILITY: %s" % issue)
     else:
-        print("all label texts stay within the wall's Z range [0, %.1f] "
-              "and the base's X width [0, %.1f]"
-              % (PARAMS["base_h"], PARAMS["base_w"]))
+        print("all label texts stay within the wall's Z range [0, %.1f] and "
+              "the base's X width [0, %.1f], and every counter/aperture "
+              "stays above the %.2fmm floor"
+              % (PARAMS["base_h"], PARAMS["base_w"], COUNTER_WIDTH_FLOOR))
 
     printability_issues = []
     mesh_issues = []
@@ -1196,7 +1388,8 @@ def run():
 
     assert not struct_issues, "structural check failed, see report above"
     assert not fuse_issues, "fuse-overlap check failed, see report above"
-    assert not label_fit_issues, "label fit check failed, see report above"
+    assert not label_legibility_issues, (
+        "label legibility check failed, see report above")
     assert not printability_issues, "printability check failed, see report above"
     assert not mesh_issues, "mesh/watertight check failed, see report above"
 
