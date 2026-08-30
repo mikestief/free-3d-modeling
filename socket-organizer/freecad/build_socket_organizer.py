@@ -63,9 +63,41 @@ PARAMS = {
                                # DOVETAIL FIT COUPON before trusting this.
 
     # --- label --------------------------------------------------------------
-    "label_h":         4.0,   # embossed text height (font size)
+    # label_h was 4.0mm; raised to 6.0mm after a real printed sample (photo
+    # provided) showed curved digit strokes ("9", "6") blobbing shut rather
+    # than resolving as open loops. Measured directly (build a text_solid()
+    # for "9"/"6" and take the bbox of the smallest-area interior wire, i.e.
+    # the counter/aperture that has to stay open on the printer): at 4.0mm
+    # with Arial Bold the counter's narrower dimension was ~0.99mm, only
+    # ~2.5x a typical 0.4mm FDM nozzle - not enough margin for 2 clean
+    # perimeter walls plus a real gap between them, which is exactly what
+    # "blobbing shut" looks like. At 6.0mm the same counter measures
+    # ~1.48-1.62mm, ~3.7-4.0x the nozzle diameter, with the digit stroke
+    # itself (measured on "1", clear of any foot/serif) going from 0.72mm
+    # at 4.0mm to 1.07mm at 6.0mm - both comfortably above the
+    # 2-perimeter-wall threshold. Verdana Bold was
+    # also measured as a "designed for small-size legibility" alternative:
+    # its counters are marginally larger (~1.62mm vs ~1.48mm for "9" at
+    # 6.0mm) but it renders meaningfully wider, and the longest label in the
+    # whole size table ("11/16") at 6.0mm only leaves ~0.59mm clearance per
+    # side inside base_w=26.0mm in Verdana Bold vs. ~3.87mm per side in
+    # Arial Bold - not worth trading a marginal counter gain for a much
+    # tighter, more fragile X-fit margin. Arial Bold (already sans-serif)
+    # stays the font; 6.0mm is the fix. See check_label_fit() for the
+    # automated version of the Z/X fit check described above.
+    "label_h":         6.0,   # embossed text height (font size)
     "label_depth":     0.6,   # how far the text stands proud
-    "label_z":         4.0,   # text baseline height on the sloped front wall
+    # label_z was 4.0 (tuned for the old label_h=4.0). At label_h=6.0 that
+    # baseline left only ~0.45mm of clearance between the label's top and
+    # base_h before the wall's top edge - workable but thin. Lowered to 3.5
+    # so the larger label is centered with real margin on both ends: worst
+    # case across every label in the size table (measured via
+    # check_label_fit/emboss_label bbox) is top_margin=0.947mm,
+    # bottom_margin=3.340mm - both comfortably positive, well inside
+    # [0, base_h]. The post lives at Z>=base_h (see make_post's final
+    # translate), so it never shares Z range with the label regardless of
+    # label size - no collision to check there.
+    "label_z":         3.5,   # text baseline height on the sloped front wall
     "label_embed":     0.2,   # back-face push past the wall plane, capped by
                                # label_depth - see emboss_label docstring.
                                # ONLY for the fused single-color path
@@ -334,6 +366,14 @@ def make_dovetail_groove_cutter(p):
 # Geometry - label text
 # --------------------------------------------------------------------------
 
+# Arial Bold stays first choice - already sans-serif, and measured against
+# Verdana Bold (a font specifically designed for small-size on-screen
+# legibility, so a reasonable candidate to check) as part of the label_h
+# fix above: Verdana Bold's counters were only marginally larger
+# (~1.62mm vs ~1.48mm for "9" at label_h=6.0) but it renders noticeably
+# wider, leaving the longest label ("11/16") only ~0.59mm clearance per
+# side inside base_w=26.0mm vs. Arial Bold's ~3.87mm - not a good trade.
+# See PARAMS['label_h']'s comment for the full measurement.
 _FONT_CANDIDATES = [
     "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
     "/System/Library/Fonts/Helvetica.ttc",
@@ -837,6 +877,45 @@ def check_cap_corner_solid(p, side):
     return None
 
 
+def check_label_fit(p):
+    """Direct geometric guarantee that every embossed label in the size
+    table - built at the current label_h/label_z - stays inside the sloped
+    wall's Z range [0, base_h] and the base's own X footprint [0, base_w].
+
+    This is the automated version of the by-hand check done when label_h
+    was raised from 4.0mm to 6.0mm (see PARAMS['label_h']'s comment): a
+    larger glyph size changes both how tall the label sits on the wall (it
+    could poke past base_h at the top, or below Z=0 at the bottom) and how
+    wide it renders (the longest label string in the whole table could run
+    outside base_w). Building every label text via emboss_label() and
+    reading its real BoundBox - not eyeballing one representative piece -
+    is what catches a regression here; label height varies slightly by
+    glyph (e.g. "/" reads slightly taller than bare digits), so the
+    per-piece Z margin isn't identical across the table and only a full
+    sweep proves the worst case.
+
+    Deduplicates by label text (not by piece/drive) since neither
+    label_h/label_z nor emboss_label's geometry depend on drive - only the
+    string does - so checking each distinct text once covers every one of
+    the 40 middle pieces without rebuilding the same label solid twice."""
+    issues = []
+    seen = set()
+    for _, _, label_text in _middle_piece_specs(p):
+        if label_text in seen:
+            continue
+        seen.add(label_text)
+        bb = emboss_label(p, label_text).BoundBox
+        if bb.ZMin < -1e-6 or bb.ZMax > p["base_h"] + 1e-6:
+            issues.append(
+                "label %r: Z[%.3f,%.3f] outside wall bounds [0, %.3f]"
+                % (label_text, bb.ZMin, bb.ZMax, p["base_h"]))
+        if bb.XMin < -1e-6 or bb.XMax > p["base_w"] + 1e-6:
+            issues.append(
+                "label %r: X[%.3f,%.3f] outside base width [0, %.3f]"
+                % (label_text, bb.XMin, bb.XMax, p["base_w"]))
+    return issues
+
+
 def check_fuse_overlaps(p):
     """Runs check_fuse_overlap()/check_cap_corner_solid() across every
     FUSE_EMBED-dependent boolean in the design. make_post and
@@ -1081,6 +1160,16 @@ def run():
               "overlap (post/base x%d drives, dovetail tail/base, "
               "cap corner cuts x2)" % len(PARAMS["drives"]))
 
+    print("\n--- label fit self-check (every label text, direct bbox) ---")
+    label_fit_issues = check_label_fit(PARAMS)
+    if label_fit_issues:
+        for issue in label_fit_issues:
+            print("LABEL-FIT: %s" % issue)
+    else:
+        print("all label texts stay within the wall's Z range [0, %.1f] "
+              "and the base's X width [0, %.1f]"
+              % (PARAMS["base_h"], PARAMS["base_w"]))
+
     printability_issues = []
     mesh_issues = []
     for name, shape in sorted(pieces.items()):
@@ -1107,6 +1196,7 @@ def run():
 
     assert not struct_issues, "structural check failed, see report above"
     assert not fuse_issues, "fuse-overlap check failed, see report above"
+    assert not label_fit_issues, "label fit check failed, see report above"
     assert not printability_issues, "printability check failed, see report above"
     assert not mesh_issues, "mesh/watertight check failed, see report above"
 
