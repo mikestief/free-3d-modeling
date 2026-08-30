@@ -330,18 +330,23 @@ def box(l, w, h, x, y, z):
 
 
 def sae_label(n32):
-    """5/16" from a /32nds numerator, reduced. n32=10 -> '5/16'."""
+    """5/16" from a /32nds numerator, reduced. n32=10 -> '5/16'.
+    A whole inch (n32=32) reduces to a 1/1 denominator - return the bare
+    integer ('1') instead of '1/1', which isn't a real fraction."""
     d = 32
     n = n32
     g = math.gcd(n, d)
-    return "%d/%d" % (n // g, d // g)
+    num, den = n // g, d // g
+    return "%d" % num if den == 1 else "%d/%d" % (num, den)
 
 
 def sae_key(n32):
-    """Filename-safe fraction, e.g. n32=10 -> '5-16in'."""
+    """Filename-safe fraction, e.g. n32=10 -> '5-16in'. A whole inch
+    (n32=32) reduces to den=1 - return '1in', not '1-1in'."""
     d = 32
     g = math.gcd(n32, d)
-    return "%d-%din" % (n32 // g, d // g)
+    num, den = n32 // g, d // g
+    return "%din" % num if den == 1 else "%d-%din" % (num, den)
 
 
 # --------------------------------------------------------------------------
