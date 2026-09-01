@@ -154,25 +154,6 @@ PARAMS = {
     # just at this one point.
     "nameplate_zone_z":       1.0,
 
-    # --- cap (start/end piece) ----------------------------------------------
-    # Was 8.0, set when base_d was 32.0 (ratio 8/32 = 0.25 of depth - see
-    # make_cap's docstring: the round cylinder only spans 2*r of base_d
-    # centered on the dovetail's Y offset, so material outside that band is
-    # cut flush instead of rounded, making 2*r/base_d the fraction of the
-    # piece's depth that actually reads as a rounded nose rather than a
-    # flat notch). Never revisited when base_d grew to 53.0 (see base_w/
-    # base_d comment above) - at the stale 8.0 that ratio silently dropped
-    # to 2*8/53 = 0.302 (down from 0.50 at the original 8/32), which is why
-    # the cap's rounded end looked like a small isolated notch/bump instead
-    # of the intended graceful rounded closure (confirmed live: a small
-    # cylindrical face patch, not a nose - and matched a user screenshot).
-    # Rescaled to preserve the original ratio: 8.0 / 32.0 * 53.0 = 13.25,
-    # restoring 2*r/base_d back to exactly 0.50. Same "TUNE"-style trap as
-    # dt_clearance/post_af_undersize above - if base_d changes again,
-    # recompute this as cap_round_r/base_d = 0.25 rather than leaving the
-    # absolute mm value behind.
-    "cap_round_r":     13.25,  # radius of the closed rounded end
-
     # --- drives -----------------------------------------------------------
     "drives":          ["3-8in", "1-2in"],
 
@@ -213,8 +194,8 @@ FUSE_EMBED = 0.1
 # this same noise-scale range, so distance-based mesh filtering alone
 # cannot reliably separate the two defect classes. That defect is instead
 # caught directly, before any mesh is involved, by check_fuse_overlap()
-# and check_cap_corner_solid() (see "Self-checks" below) - exact OCC
-# B-rep volume/topology facts, not a downstream mesh-tessellation proxy.
+# (see "Self-checks" below) - an exact OCC B-rep volume fact, not a
+# downstream mesh-tessellation proxy.
 # This tolerance's only job is filtering the post-chamfer tessellation
 # noise described above out of watertight()'s mesh self-intersection
 # check so it doesn't cry wolf on every build.
@@ -774,67 +755,16 @@ def make_template(p, drive):
 def make_cap(p, side):
     """side='start' has a tail on its right edge (mates leftward into the
     row); side='end' has a groove on its left edge (mates rightward). The
-    opposite edge is rounded off closed.
-
-    The rounding removes the corner sliver that lies OUTSIDE the round
-    cylinder but INSIDE the body's own corner strip (width cap_round_r,
-    the full base_d depth). That corner strip must sit on the body's own
-    side of the edge being rounded:
-      - side='start' rounds the LEFT edge (round_x=0), so the strip is
-        x in [0, r] - i.e. box origin round_x (NOT round_x - r, which
-        would place the box entirely at x in [-r, 0], outside the body's
-        x in [0, base_w] domain and make the cut a no-op).
-      - side='end' rounds the RIGHT edge (round_x=base_w), so the strip
-        is x in [base_w - r, base_w] - i.e. box origin round_x - r (NOT
-        round_x, which would place the box entirely outside the body at
-        x in [base_w, base_w + r], again a no-op cut).
-    Verified live: with the box positioned outside the body its overlap
-    with body is 0.0 mm3 and the round is silently skipped; positioned as
-    above the overlap is ~2445.8 mm3 and the cut actually removes ~1865.6
-    mm3 of corner material, producing a rounded nose centered on the
-    dovetail's Y offset (base_d * 0.3) rather than two square corners.
-
-    The corner box's far edge (the one away from round_x) is pulled in by
-    FUSE_EMBED, i.e. its width is cap_round_r - FUSE_EMBED rather than
-    exactly cap_round_r. Without that, the box's far edge sits at exactly
-    distance cap_round_r from the cylinder's own center - precisely on the
-    cylinder's surface - so at the one latitude where the cylinder reaches
-    its full radius (y = base_d*0.3, dead center) box and cylinder are
-    exactly tangent at a single point rather than genuinely overlapping.
-    Confirmed live: at that exact width, `corner.cut(round_cutter)` (and
-    the final cap after cutting it from body) silently splits into 2
-    disconnected Solids at that pinch point - both cap_start and cap_end
-    tessellated as `mesh NON-MANIFOLD; mesh not solid` until this was
-    caught by watertight(). Pulling the far edge in by FUSE_EMBED keeps it
-    strictly inside the cylinder everywhere, so there's no leftover sliver
-    at the pinch latitude to disconnect - real, if imperceptible (0.1mm on
-    an 8mm radius), overlap instead of a zero-gap tangent touch.
-
-    Unlike the post/tail fuses, this defect happens to still get caught by
-    watertight() at FUSE_EMBED=0 (the caps have no post fuse ahead of it
-    to mask the resulting NON-MANIFOLD mesh) - but that is incidental to
-    this cut's specific topology, not something to rely on in general.
-    check_cap_corner_solid() below checks the same thing directly, via raw
-    B-rep Solids count on the finished cap body, with no meshing involved.
-    """
+    opposite edge is left as make_base's own flat, square end - no cut
+    there at all."""
     if side not in ("start", "end"):
         raise ValueError("side must be 'start' or 'end', got %r" % side)
 
     body = make_base(p)
-
-    r = p["cap_round_r"]
     if side == "start":
         body = body.fuse(make_dovetail_tail(p))
-        round_x = 0
     else:
         body = body.cut(make_dovetail_groove_cutter(p))
-        round_x = p["base_w"]
-    round_cutter = Part.makeCylinder(
-        r, p["base_h"] + 2, App.Vector(round_x, p["base_d"] * 0.3, -1))
-    corner_w = r - FUSE_EMBED
-    corner_x = round_x if side == "start" else round_x - corner_w
-    corner = box(corner_w, p["base_d"], p["base_h"] + 2, corner_x, 0, -1)
-    body = body.cut(corner.cut(round_cutter))
     return body
 
 
@@ -992,8 +922,8 @@ def watertight(shape, label):
     geometric fact, and that defect class can sit right at the edge of
     what a mesh self-intersection distance can distinguish from ordinary
     tessellation noise (see SELF_INTERSECT_TOL). See check_fuse_overlap()
-    and check_cap_corner_solid() for the direct, tessellation-independent
-    checks that do catch it regardless."""
+    for the direct, tessellation-independent check that does catch it
+    regardless."""
     notes = []
     try:
         shape.check(True)
@@ -1089,29 +1019,36 @@ def check_fuse_overlap(base, part, label):
     return None
 
 
-def check_cap_corner_solid(p, side):
-    """Direct topological guarantee for make_cap's corner-rounding cut,
-    which relies on FUSE_EMBED to keep the corner box strictly inside the
-    round cylinder everywhere except at round_x (see make_cap's
-    docstring). At FUSE_EMBED <= 0 the box's far edge sits exactly tangent
-    to the cylinder at the dead-center latitude, and cutting the rounded
-    corner sliver out of the cap body silently splits the whole cap into 2
-    disconnected Solids there instead of raising an error - confirmed live:
-    building the actual cap at FUSE_EMBED=0 gives Solids count 2 (both
-    sides); at the real FUSE_EMBED=0.1 it is 1 for both."""
+def check_cap_solid(p, side):
+    """Sanity check that make_cap(p, side) produces a single, valid solid.
+
+    make_cap no longer has a corner-rounding cut (removed - the caps'
+    non-dovetail end is now just make_base's own flat box end), so the
+    zero-gap-tangent failure mode this check used to guard against
+    (check_cap_corner_solid, see git history) can't happen any more: there
+    is no cylinder/box cut near that end to potentially split the cap into
+    disconnected Solids.
+
+    Kept anyway, simplified, as cheap insurance on the one boolean op left
+    in make_cap that isn't already covered elsewhere: side='end's cut of
+    make_dovetail_groove_cutter(). (side='start's fuse of
+    make_dovetail_tail() onto make_base() is the exact same operation
+    check_fuse_overlap() already runs as "dovetail tail/base fuse" in
+    check_fuse_overlaps() below, so that half doesn't need a second
+    check.)"""
     cap = make_cap(p, side)
     n_solids = len(cap.Solids)
-    if n_solids != 1:
-        return ("cap_%s: %d disconnected solids (expected 1) - zero-gap "
-                "tangent at the corner rounding cut" % (side, n_solids))
+    if n_solids != 1 or not cap.isValid():
+        return ("cap_%s: %d disconnected solids (expected 1), isValid=%s"
+                % (side, n_solids, cap.isValid()))
     return None
 
 
 def check_fuse_overlaps(p):
-    """Runs check_fuse_overlap()/check_cap_corner_solid() across every
+    """Runs check_fuse_overlap()/check_cap_solid() across every
     FUSE_EMBED-dependent boolean in the design: post/base (x2 drives),
-    piece-to-piece dovetail tail/base, both cap corner cuts, and the two
-    nameplate joins (tail-to-plaque, plaque-to-template)."""
+    piece-to-piece dovetail tail/base, both caps, and the two nameplate
+    joins (tail-to-plaque, plaque-to-template)."""
     issues = []
     base_shape = make_base(p)
     for drive in p["drives"]:
@@ -1124,7 +1061,7 @@ def check_fuse_overlaps(p):
     if issue:
         issues.append(issue)
     for side in ("start", "end"):
-        issue = check_cap_corner_solid(p, side)
+        issue = check_cap_solid(p, side)
         if issue:
             issues.append(issue)
 
@@ -1221,7 +1158,7 @@ def check_nameplate_fit(p):
 
     All checks are real OCC B-rep booleans, no meshing involved - the same
     "build real geometry, verify with real booleans" discipline as check_
-    fuse_overlap/check_cap_corner_solid:
+    fuse_overlap/check_cap_solid:
 
       1. CONTAINMENT - the tail (built with no clearance) should sit
          almost entirely inside the groove cavity (built with
@@ -1369,7 +1306,7 @@ def run():
     else:
         print("all FUSE_EMBED-dependent fuses have genuine volumetric "
               "overlap (post/base x%d drives, dovetail tail/base, "
-              "cap corner cuts x2, nameplate tail/plaque, "
+              "both caps are single valid solids, nameplate tail/plaque, "
               "nameplate/template)" % len(PARAMS["drives"]))
 
     print("\n--- nameplate slot/tail fit self-check "
