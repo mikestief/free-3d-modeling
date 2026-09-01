@@ -1574,7 +1574,13 @@ def organize_plate_folders(p, out_dir, multicolor_failures):
     than re-deriving drive/unit-system from PARAMS independently: `drive`
     is yielded directly, and metric-vs-SAE reads off the name's own
     "metric_"/"sae_" prefix, the same convention _middle_piece_specs uses
-    to build that name in the first place (see its docstring).
+    to build that name in the first place (see its docstring). The set of
+    plate categories itself is derived from p["drives"] (crossed with the
+    two unit systems, which aren't drive-dependent so hardcoding just
+    "metric"/"sae" is fine) rather than a hand-encoded list of drive
+    strings, so adding/removing a drive in PARAMS doesn't require touching
+    this function - any piece whose drive isn't found in that derived set
+    is skipped and reported rather than raising KeyError.
 
     Only <name>_multicolor.3mf is in scope here - .step/.stl/_body/_label
     files stay flat in out_dir, untouched, per the confirmed scope. Copies
@@ -1582,6 +1588,13 @@ def organize_plate_folders(p, out_dir, multicolor_failures):
     originals in out_dir are never disturbed - other formats for the same
     piece live only there, and nothing else reads from the plates/
     subfolder.
+
+    Each plate subfolder is cleared (shutil.rmtree) and recreated before
+    anything is copied into it, so this is an actual rebuild every run -
+    a piece removed or renamed in PARAMS since a prior run can't leave a
+    stale <name>_multicolor.3mf sitting in a plate folder undetected.
+    Only exports/plates/* is touched this way; the flat out_dir itself is
+    out of scope and never cleared.
 
     cap_start.3mf/cap_end.3mf are duplicated into all 4 folders (not just
     referenced) since every plate/row needs both caps regardless of
@@ -1595,28 +1608,40 @@ def organize_plate_folders(p, out_dir, multicolor_failures):
     failure, and the overall build already fails loudly on it via
     run()'s `assert not export_failures`, so this step doesn't need its
     own separate hard failure, only to not crash trying to copy a file
-    that was never written.
+    that was never written. Likewise skips (does not raise) any piece
+    whose (drive, system) has no matching plate folder, collecting those
+    names to report back to the caller instead of a raw KeyError.
 
-    Returns {(drive, system): (dest_dir, n_pieces_copied)} for the
-    caller's own summary reporting."""
+    Returns (plates, skipped_unknown_category) where plates is
+    {(drive, system): (dest_dir, n_pieces_copied)} for the caller's own
+    summary reporting, and skipped_unknown_category is a list of piece
+    names whose drive wasn't found among the derived plate categories."""
     plates_dir = os.path.join(out_dir, "plates")
-    plate_keys = [("3-8in", "metric"), ("3-8in", "sae"),
-                  ("1-2in", "metric"), ("1-2in", "sae")]
+    plate_keys = [(drive, system) for drive in p["drives"]
+                  for system in ("metric", "sae")]
     plate_dirs = {}
     for drive, system in plate_keys:
         dest = os.path.join(plates_dir, "%s_%s" % (drive, system))
+        # Clear + recreate so this is a real rebuild, not additive copying -
+        # a piece removed/renamed in PARAMS can't leave a stale file behind.
+        shutil.rmtree(dest, ignore_errors=True)
         os.makedirs(dest, exist_ok=True)
         plate_dirs[(drive, system)] = dest
 
     counts = {key: 0 for key in plate_keys}
+    skipped_unknown_category = []
     for name, drive, _label_text, _nominal_mm in _middle_piece_specs(p):
         if name in multicolor_failures:
             continue
         system = "metric" if name.startswith("metric_") else "sae"
+        dest = plate_dirs.get((drive, system))
+        if dest is None:
+            skipped_unknown_category.append(name)
+            continue
         src = os.path.join(out_dir, name + "_multicolor.3mf")
         if not os.path.exists(src):
             continue
-        shutil.copy2(src, plate_dirs[(drive, system)])
+        shutil.copy2(src, dest)
         counts[(drive, system)] += 1
 
     for dest in plate_dirs.values():
@@ -1625,7 +1650,8 @@ def organize_plate_folders(p, out_dir, multicolor_failures):
             if os.path.exists(src):
                 shutil.copy2(src, dest)
 
-    return {key: (plate_dirs[key], counts[key]) for key in plate_keys}
+    plates = {key: (plate_dirs[key], counts[key]) for key in plate_keys}
+    return plates, skipped_unknown_category
 
 
 def run():
@@ -1868,10 +1894,18 @@ def run():
     # and why it silently skips names in multicolor_failures instead of
     # raising its own error (the overall build already fails loudly on those
     # via export_failures below).
-    plate_report = organize_plate_folders(PARAMS, out_dir, multicolor_failures)
+    plate_report, plate_unknown_category = organize_plate_folders(
+        PARAMS, out_dir, multicolor_failures)
     for (drive, system), (dest, n_copied) in sorted(plate_report.items()):
         print("  %s: %d piece(s) + 2 caps -> %s" % (
             "%s %s" % (drive, system), n_copied, dest))
+    # A piece whose drive has no matching plate folder is a real bug (PARAMS
+    # and _middle_piece_specs disagreeing) rather than something to skip
+    # forever - fold it into export_failures so the build still fails loudly
+    # on it, same as every other export outcome below.
+    export_failures.extend(
+        "%s: no plate folder for its drive (check PARAMS['drives'])" % name
+        for name in plate_unknown_category)
 
     coupons = {
         "post_coupon_3-8in": build_post_coupon(PARAMS, "3-8in"),
