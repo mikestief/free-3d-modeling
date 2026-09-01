@@ -2,16 +2,28 @@
 """
 Socket organizer - parametric generator for FreeCAD.
 
-Modular, interlinking socket holder. Metric (6-25mm) and SAE (5/16"-1")
-sockets, one middle piece per size/drive plus a start and end cap. Sizes
-8-22mm / 5/16"-1" come in both 3/8" and 1/2" drive; 6-7mm are 3/8" drive
-only (below what 1/2" drive needs), and 23-25mm are 1/2" drive only
-(matching real socket sets - 3/8" drive sets don't typically go that
-large). Each socket stands on a molded
-post sized to its drive square - friction on the post corners holds it
-upright, no magnet, no stick. Pieces snap together with a vertical
-dovetail (press down to seat, lift straight up to remove) so any single
-piece can be pulled without disturbing its neighbours.
+Modular, interlinking socket holder. Exactly 5 piece types, size-agnostic:
+
+  - template_3-8in / template_1-2in - a blank base+post template, one per
+    drive (3/8in / 1/2in). The post's cross-section only depends on the
+    drive square, NOT which socket size sits on it - every socket of a
+    given drive shares the same square drive-hole - so one blank template
+    per drive already physically fits every socket size in that drive.
+    No baked text anywhere. Has a small dovetail SLOT on its sloped front
+    wall for a nameplate to slide into (see below), plus the usual
+    piece-to-piece dovetail tail/groove for joining templates and caps
+    into a row.
+  - cap_start / cap_end - unchanged row-end pieces, still blank.
+  - nameplate_template - a single blank plaque with a dovetail TAIL on its
+    back that slides into a template's slot. Print as many copies as you
+    like and label each one with your slicer's own text tool (e.g. Bambu
+    Studio) - this generator no longer bakes any size text into geometry
+    at all. See nameplate_dt_neck_w/tip_w/depth/clearance below for the
+    slot/tail dimensions - TUNE VIA NAMEPLATE FIT COUPON.
+
+Pieces snap together with a vertical dovetail (press down to seat, lift
+straight up to remove) so any single piece can be pulled without
+disturbing its neighbours.
 
 Running it
 ----------
@@ -22,7 +34,8 @@ Headless (no GUI needed)::
 Outputs land in ./exports as STEP, STL and 3MF.
 
 Print the fit coupons (post_coupon_3-8in.stl, post_coupon_1-2in.stl,
-dovetail_coupon.stl) before committing to the full 61-piece set.
+dovetail_coupon.stl, nameplate_coupon.stl) before committing to a full
+print run.
 
 Copyright (c) 2026 Oxidized Apps, LLC
 SPDX-License-Identifier: MIT
@@ -31,10 +44,8 @@ SPDX-License-Identifier: MIT
 import os
 import sys
 import math
-import shutil
 import FreeCAD as App
 import Part
-import Mesh
 
 # --------------------------------------------------------------------------
 # Parameters
@@ -76,173 +87,77 @@ PARAMS = {
                                   # <= post_corner_r or OCC's chamfer on the
                                   # tiny fillet-arc top edges self-intersects.
 
-    # --- dovetail (vertical snap: open top, closed bottom) ------------------
+    # --- piece-to-piece dovetail (vertical snap: open top, closed bottom) --
     "dt_neck_w":       4.0,   # width where the tail meets the base
     "dt_tip_w":        6.0,   # width at the tail's outer edge (wider = hooks)
     "dt_depth":        4.0,   # how far the tail protrudes / groove cuts in
     "dt_clearance":    0.15,  # per-side clearance, groove vs tail. TUNE VIA
                                # DOVETAIL FIT COUPON before trusting this.
 
-    # --- label --------------------------------------------------------------
-    # label_h was 4.0mm; raised to 6.0mm after a real printed sample (photo
-    # provided) showed curved digit strokes blobbing shut rather than
-    # resolving as open loops. The original investigation here measured "9"
-    # and "6" by hand (build a text_solid() for each and take the bbox of
-    # the smallest-area interior wire, i.e. the counter/aperture that has to
-    # stay open on the printer) and used those as the worst case. A later
-    # automated sweep of every digit actually used in the size table (see
-    # narrowest_counter_width() / check_label_legibility(), which measures
-    # every distinct label text's real narrowest counter via horizontal AND
-    # vertical cross-section - not the bbox proxy used by hand here)
-    # corrected that: "4" (as in "14" and "3/4") is tighter than "9"/"6" at
-    # both sizes, and "8" (as in "8", "18") is close behind - narrower
-    # digit than either "9" or "6" originally cited. At 4.0mm with Arial
-    # Bold "4"'s counter measures 0.8497mm (vs. ~0.988-0.991mm for "9"/"6",
-    # ~0.892mm for "8"), only ~2.1x a typical 0.4mm FDM nozzle - not enough
-    # margin for 2 clean perimeter walls plus a real gap between them,
-    # which is exactly what "blobbing shut" looks like. At 6.0mm the same
-    # "4" counter measures 1.2745mm, ~3.2x the nozzle diameter (vs.
-    # ~1.482-1.486mm for "9"/"6", ~1.338mm for "8"), with the digit stroke
-    # itself (measured on "1", clear of any foot/serif) going from 0.72mm
-    # at 4.0mm to 1.07mm at 6.0mm - both comfortably above the
-    # 2-perimeter-wall threshold. Verdana Bold was
-    # also measured as a "designed for small-size legibility" alternative:
-    # its own worst-case counter is "8" at ~1.24mm at 6.0mm - about the same
-    # as Arial Bold's worst case ("4" at ~1.28mm), not "marginally larger"
-    # as an earlier version of this comment claimed by comparing only "9"
-    # in both fonts - but it renders meaningfully wider, and the longest
-    # label in the whole size table ("11/16") at 6.0mm only leaves ~0.59mm
-    # clearance per side inside base_w=26.0mm in Verdana Bold vs. ~3.87mm
-    # per side in Arial Bold - not worth trading a wash on counter size for
-    # a much tighter, more fragile X-fit margin. Arial Bold (already
-    # sans-serif) stays the font; 6.0mm is the fix. See
-    # check_label_legibility() for the automated version of both the Z/X
-    # fit check and the counter-width check described above -
-    # COUNTER_WIDTH_FLOOR documents the 1.0mm regression floor chosen from
-    # these same measurements.
-    "label_h":         6.0,   # embossed text height (font size)
-    "label_depth":     0.6,   # how far the text stands proud
-    # label_z was 4.0 (tuned for the old label_h=4.0). At label_h=6.0 that
-    # baseline left only ~0.45mm of clearance between the label's top and
-    # base_h before the wall's top edge - workable but thin. Lowered to 3.5
-    # so the larger label is centered with real margin on both ends: worst
-    # case across every label in the size table (measured via
-    # check_label_legibility/emboss_label bbox) is top_margin=0.947mm,
-    # bottom_margin=3.340mm - both comfortably positive, well inside
-    # [0, base_h]. The post lives at Z>=base_h (see make_post's final
-    # translate), so it never shares Z range with the label regardless of
-    # label size - no collision to check there.
-    "label_z":         3.5,   # text baseline height on the sloped front wall
-    "label_embed":     0.2,   # back-face push past the wall plane, capped by
-                               # label_depth - see emboss_label docstring.
-                               # ONLY for the fused single-color path
-                               # (make_middle_piece's body.fuse(label)) -
-                               # OCC's fuse() needs real volumetric overlap
-                               # at the seam or it produces invalid,
-                               # non-manifold geometry at exact tangency.
-    "label_embed_multicolor": 0.03,  # BASE/FLOOR back-face push for the
-                               # UNFUSED multi-color 3MF export
-                               # (export_multicolor_3mf). NOT a single flat
-                               # depth used for every label any more - see
-                               # per_label_multicolor_embed() and
-                               # generate_all_parts_multicolor(). Body and
-                               # label stay two separate solids/meshes on
-                               # this path - nothing is booleaned, so none
-                               # of label_embed's 0.2mm OCC-fuse-validity
-                               # margin is needed.
-                               #
-                               # History: label_embed's full 0.2mm WAS
-                               # originally used on this path too, which put
-                               # ~0.2mm of literally-overlapping body/label
-                               # volume, assigned to two different
-                               # filaments, along the entire label outline -
-                               # confirmed (real test print, Bambu Studio
-                               # slice preview) to show up as a visible
-                               # white seam traced exactly around the label
-                               # text. Dropping to a flat 0.03mm for every
-                               # label fixed that seam, but a later real
-                               # Bambu Studio import of metric_7mm_3-8in and
-                               # sae_1in_3-8in (labels "7" and "1") showed
-                               # the OPPOSITE defect: the label floating,
-                               # visibly disconnected from the body.
-                               #
-                               # Root cause, confirmed by sweeping
-                               # body.common(label).Volume for every
-                               # distinct label text in the size table at
-                               # this flat 0.03mm: "1"/"7" (the simplest,
-                               # narrowest-stroke digits) have far less
-                               # material at the wall than every other
-                               # label, so even though the B-rep genuinely
-                               # touches (distToShape == 0.0), their overlap
-                               # volume (~0.22-0.25mm3) is small enough for
-                               # independent per-object mesh tessellation
-                               # noise (this file's own
-                               # LINEAR_DEFLECTION=0.02mm, documented above
-                               # as producing ~0.004-0.018mm noise) to
-                               # plausibly erase the connection in the
-                               # exported mesh - while wide labels ("9/16"
-                               # etc.) already sit at 1.2-1.4mm3 at this same
-                               # 0.03mm depth, nowhere near that risk. A
-                               # uniform embed increase can't fix this
-                               # without reintroducing the seam: raising it
-                               # enough for "1"/"7" pushes wide labels back
-                               # toward the ~1.69mm3+ overlap that caused the
-                               # original seam - there is very little
-                               # headroom ("5/16" is already at 1.19mm3 at
-                               # this floor).
-                               #
-                               # So this value is now only the STARTING
-                               # POINT: the real per-label push depth is
-                               # computed per distinct label text by
-                               # per_label_multicolor_embed(), which leaves
-                               # a label at exactly this depth if its
-                               # overlap already clears MC_TARGET_OVERLAP_MM3
-                               # here (no added seam risk for labels that
-                               # don't need more), and increases it - capped
-                               # at MC_EMBED_CAP_MM - only for labels that
-                               # need more. See MC_TARGET_OVERLAP_MM3,
-                               # MC_EMBED_CAP_MM, and run()'s widened
-                               # multicolor-overlap self-check
-                               # (check_multicolor_overlap) for the measured
-                               # numbers.
-                               #
-                               # Why not zero overlap (an exact shared
-                               # boundary) instead of a small deliberate
-                               # one? Because this file has already hit that
-                               # exact failure mode once - see FUSE_EMBED
-                               # above: OCC produces invalid/non-manifold
-                               # geometry at exact zero-gap tangency. A
-                               # zero-overlap split would need its own proof
-                               # that the UNFUSED export path (independently
-                               # tessellated body/label meshes, not a single
-                               # B-rep boolean) avoids that failure mode too,
-                               # which hasn't been established. A small,
-                               # measured, deliberate overlap (now tuned per
-                               # label text rather than flat) is the
-                               # pragmatic choice given that history.
+    # --- nameplate dovetail slot/tail (light-duty wall attachment) ----------
+    # New geometry, no prior fit history at all - unlike dt_clearance/
+    # post_af_undersize above (which had years of this file's own git
+    # history plus real prints to anchor them), these four are a first
+    # engineering guess only. Scaled down from the piece-to-piece
+    # dovetail's 4.0/6.0/4.0mm (neck/tip/depth) because the nameplate is a
+    # light decorative/informational attachment (holds only its own small
+    # mass, no load-bearing role), not a structural joint between two
+    # printed pieces - roughly 3/4 scale keeps the neck wall
+    # (nameplate_dt_neck_w/2 = 1.5mm) safely above the 1.2mm FDM
+    # minimum-wall floor this file already uses elsewhere (see
+    # check_structural), while still being visibly smaller/lighter than
+    # the piece connector so it doesn't look oversized against a plaque
+    # this thin (nameplate_t=2.0mm). dt_clearance's own value (0.15mm) is
+    # reused as-is for the starting clearance rather than guessed fresh -
+    # it's a real measured FDM-printer clearance already proven to work
+    # for a vertical dovetail on this same printer/process, and the
+    # nameplate slot is the same "press down to seat, lift straight up"
+    # mechanism at smaller scale, not a different mechanism that would
+    # need its own independent clearance derivation.
+    # TUNE VIA NAMEPLATE FIT COUPON before trusting any of these four.
+    "nameplate_dt_neck_w":   3.0,
+    "nameplate_dt_tip_w":    4.5,
+    "nameplate_dt_depth":    2.0,
+    "nameplate_dt_clearance": 0.15,
+
+    # --- nameplate plaque -----------------------------------------------------
+    # One fixed size (not variable per text length - text is no longer this
+    # generator's concern at all, see module docstring). Sized to comfortably
+    # fit the old label zone: the embossed labels this replaces used to sit
+    # on the wall in a Z band of roughly [3.3, 9.1] (see the removed
+    # label_h/label_z params' git history) - nameplate_h=6.0 plus
+    # nameplate_zone_z=1.0 lands the plaque's own Z span in a similar part
+    # of the wall (see check_nameplate_fit's live-measured bbox for the
+    # exact numbers with this geometry's actual rotation math, which is
+    # more involved than the old flat label - see make_nameplate_slot_cutter's
+    # docstring). nameplate_w=22.0 leaves >10mm clearance to base_w=43.0 on
+    # each side - comfortably inside the base footprint with room to spare
+    # for the slicer's own text at a readable size. nameplate_t=2.0mm clears
+    # the 1.2mm FDM minimum-wall floor with margin while leaving real depth
+    # for the slicer's engraved/embossed text to actually read.
+    # TUNE VIA NAMEPLATE FIT COUPON (exact proportions, not the interlock
+    # mechanism itself, are the open question here).
+    "nameplate_w":           22.0,
+    "nameplate_h":            6.0,
+    "nameplate_t":            2.0,
+    # Extra slide-in headroom above the plaque's own height so the groove
+    # is genuinely "open at the top" (room to start the tail above its
+    # resting position and slide it down to seat) rather than exactly
+    # matching the tail's own height, which would leave no slide travel at
+    # all.
+    "nameplate_slot_open_h":  2.0,
+    # World-Z anchor for the BOTTOM of the slot/plaque (the "closed bottom"
+    # stop the tail rests against) - see make_nameplate_slot_cutter's
+    # docstring for why this single anchor Z, run through the same
+    # rotate-then-translate math emboss_label used to use for text, lands
+    # the slot/tail flush on the sloped wall for their WHOLE height, not
+    # just at this one point.
+    "nameplate_zone_z":       1.0,
 
     # --- cap (start/end piece) ----------------------------------------------
     "cap_round_r":     8.0,   # radius of the closed rounded end
 
-    # --- sizes covered --------------------------------------------------------
-    # Corrected against the user's actual photographed socket trays (two
-    # Craftsman sets), which don't match the previous assumed ranges: their
-    # 3/8" drive metric tray runs 6-22mm (not 8-19mm - missing 6/7mm
-    # entirely, and 20-22mm turned out to exist in 3/8" drive too, not just
-    # 1/2"), and their 3/8" drive SAE tray runs 5/16"-1" (not 5/16"-3/4" -
-    # 13/16" through 1" also exist in 3/8" drive). Their 1/2" drive metric
-    # tray goes up to 36mm but the existing 25mm cap here is being kept
-    # deliberately (user confirmed no change needed at that end).
-    #
-    # Three categories per system now (see _middle_piece_specs):
-    # 3/8"-drive-only (small sizes below what 1/2" drive needs), common to
-    # both drives, and 1/2"-drive-only (large sizes 3/8" drive sets don't
-    # carry). SAE no longer has a drive-only category at all - every SAE
-    # size the 1/2" tray has, the 3/8" tray has too.
-    "metric_mm_3_8in_only":  [6, 7],                      # 6..7 inclusive, 3/8in only
-    "metric_mm":       list(range(8, 23)),                # 8..22 inclusive, both drives
-    "metric_mm_1_2in_only": list(range(23, 26)),          # 23..25 inclusive, 1/2in only
-    "sae_frac_32nds":  [10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32],  # 5/16..1in in 1/32nds, both drives
+    # --- drives -----------------------------------------------------------
     "drives":          ["3-8in", "1-2in"],
 
     # --- printer --------------------------------------------------------------
@@ -252,186 +167,76 @@ PARAMS = {
 LINEAR_DEFLECTION = 0.02
 ANGULAR_DEFLECTION = math.radians(5.0)
 
-# How far to push a piece that gets FUSED (not cut) onto the base past the
-# shared boundary, so the two solids have genuine volumetric overlap instead
-# of a zero-gap tangent touch. See make_post's docstring for why this
-# matters - OCC's fuse silently produces self-intersecting/non-manifold
-# results at exact tangency, invisible to isValid()/Solids-count checks.
+# How far to push a piece that gets FUSED (not cut) onto another, so the two
+# solids have genuine volumetric overlap instead of a zero-gap tangent touch.
+# See make_post's docstring for why this matters - OCC's fuse silently
+# produces self-intersecting/non-manifold results at exact tangency,
+# invisible to isValid()/Solids-count checks. Also used for the nameplate's
+# own two FUSE_EMBED-dependent joins (tail-to-plaque, plaque-to-template) -
+# see make_nameplate / _nameplate_plaque_shape.
 FUSE_EMBED = 0.1
 
-# Tolerance for treating a mesh "self-intersection" as real. MeshPart's
-# tessellation of a curved surface fused/tangent to a flat one (the post's
-# chamfer-on-fillet corners; a curved font glyph's silhouette crossing the
-# base's sloped wall where the embossed label emerges from it) reliably
-# reports sub-chord-tolerance crossing segments - measured here at
-# 0.004-0.018mm, always inside LINEAR_DEFLECTION itself (0.02mm) - i.e.
-# noise from the tessellation's own approximation error at the seam between
-# two independently-meshed faces, not a real overlap. It reproduces across
-# a wide range of embed depth, font size, and mesh deflection settings, so
-# it is not something parameter-tuning the geometry can clear.
+# Tolerance for treating a mesh "self-intersection" as real rather than
+# tessellation noise. MeshPart's tessellation of a curved surface fused/
+# tangent to a flat one - specifically the post's chamfer-on-fillet top
+# corners (post_top_chamfer meeting post_corner_r's tiny fillet arcs)
+# fused onto the base - reliably reports sub-chord-tolerance crossing
+# segments: measured live on the current templates at 0.004mm, well
+# inside LINEAR_DEFLECTION itself (0.02mm), i.e. noise from the
+# tessellation's own approximation error at that seam, not a real
+# overlap. Confirmed by removing this tolerance entirely (report every
+# self-intersection unconditionally): both templates then fail watertight
+# on exactly this 0.004mm post-chamfer noise, reproducing regardless of
+# what other geometry (labels, dovetail slots) exists on the piece -
+# this is a real, independent artifact of the post geometry itself, not
+# something parameter-tuning elsewhere can clear.
 #
-# IMPORTANT - what this tolerance does NOT catch: the zero-gap-tangent-fuse
-# defect class (FUSE_EMBED reverted to 0 on make_post/make_dovetail_tail)
-# measures only ~0.014mm worst self-intersection distance for a middle
-# piece (~0.0044mm for an isolated post+base fuse alone) - inside this
-# tolerance's range and overlapping the noise band above, not "at the
-# scale of the feature involved (millimeters)" as an earlier version of
-# this comment claimed. That claim was wrong: verified live, distance-based
-# filtering cannot reliably separate that defect from ordinary tessellation
-# noise, because their measured ranges overlap. 59 of 61 pieces (every
-# middle piece) would silently pass watertight() with FUSE_EMBED=0; only
-# the 2 caps still fail, and only via a different, tolerance-independent
-# check (NON-MANIFOLD/not-solid) that happens to catch the caps' specific
-# failure shape, not the middle pieces'.
-#
-# The zero-gap-fuse defect is instead caught directly, before any fuse or
-# mesh is involved, by check_fuse_overlap() and check_cap_corner_solid()
-# (see "Fuse-overlap self-checks" below) - exact OCC B-rep volume/topology
-# facts, not a downstream mesh-tessellation proxy. This tolerance's only
-# remaining job is filtering genuine tessellation noise (the curved-surface
-# seams described above) out of the mesh self-intersection check so it
-# doesn't cry wolf on every build; it is not a defense against zero-gap
-# fuses of any kind.
+# IMPORTANT - what this tolerance does NOT catch: a zero-gap-tangent-fuse
+# defect (FUSE_EMBED reverted to 0 on make_post/make_dovetail_tail/the
+# nameplate joins) measures self-intersection distances that can fall in
+# this same noise-scale range, so distance-based mesh filtering alone
+# cannot reliably separate the two defect classes. That defect is instead
+# caught directly, before any mesh is involved, by check_fuse_overlap()
+# and check_cap_corner_solid() (see "Self-checks" below) - exact OCC
+# B-rep volume/topology facts, not a downstream mesh-tessellation proxy.
+# This tolerance's only job is filtering the post-chamfer tessellation
+# noise described above out of watertight()'s mesh self-intersection
+# check so it doesn't cry wolf on every build.
 SELF_INTERSECT_TOL = 2 * LINEAR_DEFLECTION
-
-# Minimum acceptable width (mm) for the narrowest interior counter/aperture
-# across every distinct label text in the size table - see
-# narrowest_counter_width() and check_label_legibility(). This is the
-# automated regression guard for the exact defect a real printed sample
-# (photo) showed before PARAMS["label_h"] was raised from 4.0mm to 6.0mm: a
-# digit's interior counter printing too narrow to resolve as an open loop,
-# blobbing shut into a solid blob instead. check_label_legibility's other
-# half (bbox placement) cannot catch this - a label can stay perfectly
-# in-bounds while a future label_h/font change shrinks a counter back down
-# to the photographed defect, and only a real measurement of what is
-# happening INSIDE the glyph's own silhouette can.
-#
-# Derivation: 2 perimeter walls at a conservative 0.4mm nozzle diameter
-# need 0.8mm of solid material to print at all; on top of that the opening
-# between them needs enough real, non-touching air gap to resolve as a
-# genuine hole rather than the two walls fusing together - roughly another
-# half a nozzle width, i.e. 1.0mm total (2.5x nozzle diameter). Verified
-# against this file's own history: at label_h=4.0 (the old, too-small
-# value that produced the photographed blobby digits) the narrowest
-# counter across the whole size table measures 0.8497mm ("4", as in "14"
-# and "3/4") - below this floor, as it should be, since that is the exact
-# defect being guarded against. At label_h=6.0 (current) it measures
-# 1.2745mm, also "4" - above the floor with real, if not huge, margin
-# (~28%).
-COUNTER_WIDTH_FLOOR = 1.0
 
 # Two real hand-measured (calipers) socket outer-diameter data points,
 # supplied by the user, anchoring the base footprint against actual socket
 # hardware rather than an assumption: a 22mm socket measures ~30mm OD; a
 # 25mm socket measures ~35mm OD. These are socket BODY widths, not the
-# drive-square size - the previous base_w=26.0/base_d=32.0 footprint was
-# sized against an unmeasured assumption about the largest (19mm/3-4in)
-# socket's OD, which this data point shows was never actually verified
-# against real hardware.
+# drive-square size.
 #
 # estimated_socket_od_mm() linearly interpolates/extrapolates between these
-# two points to estimate OD for any nominal size (mm) - used to find the
-# TRUE worst case across the whole size range, not just assume the largest
-# metric size (25mm, OD 35mm exactly per the measured point) is
-# automatically the tightest. It isn't: converting 1in SAE to its
-# metric-equivalent bore (25.4mm) and running it through the same line
-# predicts an OD of ~35.67mm, slightly LARGER than 25mm's measured 35mm -
-# see check_socket_od_clearance(), which sweeps every distinct size in the
-# whole table (derived from _middle_piece_specs(p), the single source of
-# truth for the size/category table) through this model rather than
-# hardcoding an assumed worst case. The sweep is cheap (a few
-# cylinder/box booleans per size, not full piece geometry), so it costs
-# nothing to check every size rather than trying to guess in advance which
-# subset holds the worst case.
+# two points to estimate OD for any nominal size (mm). check_socket_od_
+# clearance() uses it for the one real worst-case size still relevant now
+# that the piece set is size-agnostic templates rather than a per-size
+# table: converting 1in SAE to its metric-equivalent bore (25.4mm) and
+# running it through this line predicts an OD of ~35.67mm, slightly LARGER
+# than 25mm metric's own measured 35mm point - so 1in SAE, not 25mm metric,
+# is the true worst case a template's fixed footprint has to clear.
 SOCKET_OD_POINTS_MM = [(22.0, 30.0), (25.0, 35.0)]
 
 # Minimum acceptable clearance (mm) between the estimated widest socket body
 # and the base footprint's own outer edge, in any of the four directions
-# (left/right/front/back from the post center). This is the automated
-# regression guard for PARAMS["base_w"]/["base_d"]'s resize - see the
-# PARAMS comment for the live-measured numbers at base_w=43.0/base_d=53.0:
-# the tightest real margin measured (via check_socket_od_clearance's own
-# real B-rep booleans - a probe cylinder's BoundBox against the footprint
-# edges, plus common()-with-dovetail checks confirming zero collision) was
-# ~2.3mm (the 1in SAE size's back-edge margin, the true worst case per the
-# note on SOCKET_OD_POINTS_MM above - narrower than the 25mm metric size's
-# 2.64mm). 1.5mm sits below that with real, if not huge, margin (~35%),
-# the same "floor below the measured worst case with room for a real
-# regression to still be caught" pattern as COUNTER_WIDTH_FLOOR above.
+# (left/right/front/back from the post center). See PARAMS's base_w/base_d
+# comment for the live-measured numbers at base_w=43.0/base_d=53.0: the
+# tightest real margin measured (via check_socket_od_clearance's own real
+# B-rep booleans) was ~2.3mm (the 1in SAE size's back-edge margin - narrower
+# than the 25mm metric size's 2.64mm). 1.5mm sits below that with real, if
+# not huge, margin (~35%).
 #
-# Unlike COUNTER_WIDTH_FLOOR (grounded in an independent physical fact -
-# nozzle diameter - not just the current design's own numbers), this floor
-# has no such external anchor: SOCKET_OD_POINTS_MM is only two measured
-# points, and estimated_socket_od_mm() is a linear guess between/near them,
-# not a physical law. 1.5mm is chosen to absorb ordinary FDM dimensional
-# tolerance (typically a few tenths of a mm) many times over, plus a real
-# buffer for that OD-model uncertainty - not just "smaller than today's
-# margin." If SOCKET_OD_POINTS_MM is ever refined with more measured sizes,
-# revisit whether 1.5mm is still the right floor for the (hopefully
-# tighter) resulting estimate.
+# Unlike COUNTER_WIDTH_FLOOR used to be (grounded in an independent physical
+# fact - nozzle diameter), this floor has no such external anchor:
+# SOCKET_OD_POINTS_MM is only two measured points, and estimated_socket_
+# od_mm() is a linear guess between/near them, not a physical law. 1.5mm is
+# chosen to absorb ordinary FDM dimensional tolerance (typically a few
+# tenths of a mm) many times over, plus a real buffer for that OD-model
+# uncertainty.
 OD_CLEARANCE_FLOOR = 1.5
-
-# Target minimum body/label overlap volume (mm3), PER DISTINCT LABEL TEXT, for
-# the UNFUSED multi-color 3MF export - see per_label_multicolor_embed() and
-# PARAMS["label_embed_multicolor"]'s comment for the full story. Chosen with
-# real margin on both sides of the two measured failure ranges:
-#
-#   - floating-prone: at the old flat 0.03mm embed, "1" and "7" (the
-#     simplest, narrowest-stroke digits) measure only ~0.22-0.25mm3 overlap -
-#     small enough for independent per-object mesh tessellation noise
-#     (~0.004-0.018mm, see SELF_INTERSECT_TOL) to plausibly erase the
-#     connection in the exported mesh even though the B-rep genuinely
-#     touches. This is the confirmed root cause of a real user's Bambu
-#     Studio import (metric_7mm_3-8in, sae_1in_3-8in) showing the label
-#     floating off the body.
-#   - seam-prone: label_embed=0.2mm (the fused single-color path's depth,
-#     never used on this unfused path) produces overlap around 1.69mm3+ for
-#     these same labels - confirmed via an earlier real test print to leave
-#     a visible white seam traced around the label outline in Bambu
-#     Studio's slice preview.
-#
-# 0.8mm3 sits in between with real margin either way: ~3.2-3.6x the worst
-# floating-prone overlap measured, ~0.47x the seam-prone overlap that
-# actually caused a printed defect. Verified live (see run()'s widened
-# multicolor-overlap self-check) that every distinct label text in the
-# actual size table reaches this target at or below MC_EMBED_CAP_MM, so the
-# cap is never actually exercised by real label text - it exists only to
-# bound a hypothetical pathological one.
-MC_TARGET_OVERLAP_MM3 = 0.8
-
-# Regression floor for run()'s widened multicolor-overlap self-check -
-# deliberately a bit below MC_TARGET_OVERLAP_MM3 (not equal to it) so the
-# check doesn't flap on the tiny (~1e-7mm3, pure float noise - verified live)
-# residual the linear fit in per_label_multicolor_embed() leaves below the
-# exact target, while still sitting with real margin above the ~0.22-0.25mm3
-# floating-prone range this whole mechanism exists to fix.
-MC_OVERLAP_FLOOR = 0.75
-
-# Second sample embed depth used by per_label_multicolor_embed() to fit a
-# local line (overlap vs. embed, for one FIXED glyph) and solve for the depth
-# that reaches MC_TARGET_OVERLAP_MM3. Verified live: for every distinct label
-# text in the size table, overlap vs. embed is linear to within float noise
-# over this whole 0.03-0.15mm range (a single 2-point fit lands within
-# ~1e-7mm3 of the exact target, no iteration needed in practice) - because
-# for a fixed glyph, overlap is essentially (contact cross-section area) x
-# (push depth), a real geometric relationship, not an extrapolation across
-# different physical objects the way estimated_socket_od_mm()'s two-point
-# model is (that one is explicitly flagged as unreliable outside its anchor
-# range; this one is a local fit for a single fixed shape, and reliable
-# across the whole range actually used).
-MC_EMBED_FIT_SAMPLE = 0.10
-
-# Hard cap (mm) on the per-label multi-color push-in depth, so a
-# pathological label text (not expected anywhere in the real size table -
-# see run()'s report of the actual max embed needed, measured live at
-# ~0.107mm for "1", the worst case) can't run away to an unreasonably deep
-# push that risks its own seam-type problems. Comfortably below
-# label_embed=0.2mm (the fused single-color path's depth, sized for a
-# different requirement - OCC fuse-validity, not visual overlap - see
-# label_embed's PARAMS comment) and below label_depth=0.6mm, which
-# emboss_label's own `embed = min(embed, p["label_depth"])` already caps
-# every embed value against regardless.
-MC_EMBED_CAP_MM = 0.15
 
 
 def estimated_socket_od_mm(nominal_mm):
@@ -440,23 +245,15 @@ def estimated_socket_od_mm(nominal_mm):
     SOCKET_OD_POINTS_MM. Not a physical model - sockets aren't actually
     linear in OD-vs-bore across their whole range - but a reasonable
     estimate near the two measured points (22mm, 25mm), which is exactly
-    what check_socket_od_clearance()'s sweep needs it for: finding the
-    TRUE worst case among the sizes near those anchors (25mm metric, 1in
-    SAE - see SOCKET_OD_POINTS_MM's comment) and confirming it clears the
+    what check_socket_od_clearance() needs it for: confirming the one real
+    worst-case size (1in SAE, see that function's docstring) clears the
     base footprint.
 
     This is NOT a trustworthy estimate far below the anchors: extrapolated
     down to small nominal sizes, the line goes unphysical - it predicts an
-    OD *smaller than the bore itself*, which is impossible (a socket's OD
-    can never be less than its own drive/bore size). E.g.
-    estimated_socket_od_mm(6) = 3.33mm, estimated_socket_od_mm(7) = 5.0mm.
-    check_socket_od_clearance()'s sweep still runs this model across the
-    whole 6-25mm metric / 5/16-1in SAE table, including those small sizes
-    - harmlessly, since they're nowhere near the true worst case and pass
-    trivially regardless of how wrong their individual OD estimate is -
-    but a PASS on a small size is not real assurance that this model was
-    doing meaningful work there. See SOCKET_OD_POINTS_MM's comment for why
-    the sweep beats hardcoding a single assumed worst-case size."""
+    OD *smaller than the bore itself*, which is impossible. Not a concern
+    for check_socket_od_clearance(), which only ever evaluates it near the
+    anchor range (22-25.4mm)."""
     (x0, y0), (x1, y1) = SOCKET_OD_POINTS_MM
     slope = (y1 - y0) / (x1 - x0)
     return y0 + slope * (nominal_mm - x0)
@@ -473,26 +270,6 @@ def box(l, w, h, x, y, z):
     return Part.makeBox(l, w, h, App.Vector(x, y, z))
 
 
-def sae_label(n32):
-    """5/16" from a /32nds numerator, reduced. n32=10 -> '5/16'.
-    A whole inch (n32=32) reduces to a 1/1 denominator - return the bare
-    integer ('1') instead of '1/1', which isn't a real fraction."""
-    d = 32
-    n = n32
-    g = math.gcd(n, d)
-    num, den = n // g, d // g
-    return "%d" % num if den == 1 else "%d/%d" % (num, den)
-
-
-def sae_key(n32):
-    """Filename-safe fraction, e.g. n32=10 -> '5-16in'. A whole inch
-    (n32=32) reduces to den=1 - return '1in', not '1-1in'."""
-    d = 32
-    g = math.gcd(n32, d)
-    num, den = n32 // g, d // g
-    return "%din" % num if den == 1 else "%d-%din" % (num, den)
-
-
 # --------------------------------------------------------------------------
 # Geometry - base and post
 # --------------------------------------------------------------------------
@@ -501,8 +278,9 @@ def wall_y_at_z(p, z):
     """Y position of the sloped front wall's surface at height z.
 
     Single source of truth for the wall's geometry: make_base's wedge cut
-    and emboss_label's placement both derive from this same line so they
-    can't silently drift apart."""
+    and the nameplate slot/tail placement (make_nameplate_slot_cutter,
+    make_nameplate_tail, _nameplate_plaque_shape) all derive from this same
+    line so they can't silently drift apart."""
     return z * math.tan(math.radians(p["front_slope_deg"]))
 
 
@@ -536,19 +314,11 @@ def make_post(p, drive):
     keys off p["post_h"] - is untouched) before the final translate onto
     the base's top (z=base_h). Without this, fusing the post onto the base
     is a zero-gap tangent boolean (bottom face of post exactly coincident
-    with the base's top face over the post's whole footprint) - the same
-    OCC pathology documented in emboss_label's docstring, and it produced
-    real fallout here: fine_mesh flagged every one of the 42 generated
-    pieces (the size table at the time - since grown to 61; the underlying
-    defect and fix are unchanged) as `mesh self-intersects` until this and
-    make_dovetail_tail's matching fix were added. NOTE: that mesh
-    self-intersection distance is NOT a reliable way to catch this defect
-    - reverting FUSE_EMBED to 0
-    only pushes the measured self-intersection to ~0.0044mm (isolated
-    post+base) / ~0.014mm (full middle piece), inside SELF_INTERSECT_TOL's
-    noise-filtering range, so watertight() would silently pass it. The
-    check that actually catches a zero-gap post/base fuse is
-    check_fuse_overlap()'s direct base.common(post).Volume assertion (see
+    with the base's top face over the post's whole footprint) - OCC's
+    fuse() silently produces self-intersecting/non-manifold geometry at
+    exact tangency, invisible to isValid()/Solids-count checks. The check
+    that actually catches a zero-gap post/base fuse is check_fuse_
+    overlap()'s direct base.common(post).Volume assertion (see
     "Fuse-overlap self-checks"), which needs no mesh at all."""
     af = p["drive_af_nominal"][drive] - p["post_af_undersize"]
     r = p["post_corner_r"]
@@ -571,7 +341,7 @@ def make_post(p, drive):
 
 
 # --------------------------------------------------------------------------
-# Geometry - vertical dovetail (open top, closed bottom)
+# Geometry - vertical piece-to-piece dovetail (open top, closed bottom)
 # --------------------------------------------------------------------------
 
 def _dt_profile(p, outward, clearance=0.0, root_embed=0.0):
@@ -600,13 +370,9 @@ def make_dovetail_tail(p):
     """Protrudes from the base's right (+X) side, full base height.
 
     root_embed=FUSE_EMBED pushes the root face FUSE_EMBED past x=base_w
-    into the base's own solid before make_middle_piece/make_cap fuse this
-    onto the base, so the fuse has genuine volumetric overlap rather than a
-    zero-gap tangent touch at x=base_w (see make_post's docstring - this
-    was the other half of the same self-intersecting-mesh bug, and it hit
-    every piece including the caps, which showed `mesh NON-MANIFOLD`
-    instead of `mesh self-intersects` since they lack the post/label fuses
-    that pushed the middle pieces further into self-intersection). As with
+    into the base's own solid before make_template/make_cap fuse this onto
+    the base, so the fuse has genuine volumetric overlap rather than a
+    zero-gap tangent touch at x=base_w (see make_post's docstring). As with
     make_post, mesh self-intersection distance alone cannot be trusted to
     catch a reverted FUSE_EMBED here - see check_fuse_overlap(), which
     asserts base.common(tail).Volume > 0 directly. The outward-facing tip
@@ -630,242 +396,258 @@ def make_dovetail_groove_cutter(p):
 
 
 # --------------------------------------------------------------------------
-# Geometry - label text
+# Geometry - nameplate dovetail slot/tail (light-duty, on the sloped wall)
 # --------------------------------------------------------------------------
 
-# Arial Bold stays first choice - already sans-serif, and measured against
-# Verdana Bold (a font specifically designed for small-size on-screen
-# legibility, so a reasonable candidate to check) as part of the label_h
-# fix above: Verdana Bold's own worst-case counter ("8", ~1.24mm at
-# label_h=6.0) is about the same as Arial Bold's own worst case ("4",
-# ~1.28mm) - not "marginally larger" as an earlier version of this comment
-# claimed by comparing only digit "9" in both fonts - but Verdana renders
-# noticeably wider, leaving the longest label ("11/16") only ~0.59mm
-# clearance per side inside base_w=26.0mm vs. Arial Bold's ~3.87mm - not a
-# good trade for a wash on counter size.
-# See PARAMS['label_h']'s comment for the full measurement.
-_FONT_CANDIDATES = [
-    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-    "/System/Library/Fonts/Helvetica.ttc",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "C:/Windows/Fonts/arialbd.ttf",
-]
+def _nameplate_dt_profile(p, outward, clearance=0.0, root_embed=0.0):
+    """2D dovetail profile in the LOCAL X-Z plane (X = width across the
+    wall, unaffected by the X-axis rotation applied below; Z = protrusion
+    into/out of the wall). This is the same local-frame convention the
+    removed emboss_label() used to use for embossed text - local X = the
+    reading/width direction (untouched by an X-axis rotation), local Z =
+    the "thickness"/protrusion axis, which after rotation becomes the
+    wall's own outward-facing normal.
+
+    The caller extrudes the returned face along local Y (the "vertical,
+    press-down-to-seat" slide axis, before rotation) and then applies the
+    SAME rotate-then-translate as make_nameplate_slot_cutter / make_
+    nameplate_tail / _nameplate_plaque_shape, so every one of those lands
+    on the sloped wall consistently - see make_nameplate_slot_cutter's
+    docstring for the algebra proving that rotation puts local Z=0 exactly
+    on the wall's real surface for the WHOLE local-Y extent of the shape,
+    not just at one anchor point (the same proof the old emboss_label
+    docstring gave for text)."""
+    neck = p["nameplate_dt_neck_w"] / 2.0 + clearance
+    tip = p["nameplate_dt_tip_w"] / 2.0 + clearance
+    depth = p["nameplate_dt_depth"]
+    sign = 1 if outward else -1
+    root_z = -sign * root_embed
+    pts = [
+        App.Vector(-neck, 0, root_z),
+        App.Vector(-tip, 0, sign * depth),
+        App.Vector(tip, 0, sign * depth),
+        App.Vector(neck, 0, root_z),
+        App.Vector(-neck, 0, root_z),
+    ]
+    return Part.Face(Part.makePolygon(pts))
 
 
-def pick_font():
-    for path in _FONT_CANDIDATES:
-        if os.path.exists(path):
-            return path
-    raise RuntimeError("no usable font found; add a path to _FONT_CANDIDATES")
+def _place_on_wall(p, solid, z_anchor, x_offset=0.0):
+    """Rotate+translate a solid built in the "local wall frame" (local Y =
+    up the slope, local Z = wall outward normal, local X = world X
+    unchanged) into world space, landing local Y=0 / local Z=0 at world
+    Z=z_anchor on the wall surface (world Y = wall_y_at_z(p, z_anchor)),
+    additionally shifted by `x_offset` in X (e.g. base_w/2 to center a
+    shape built around local X=0 on the wall).
+
+    Proof this lands local Z=0 on the real wall surface for EVERY local Y
+    (not just Y=0): rotating point (x, y, 0) by angle theta=(90-slope)
+    about the X axis gives world-frame (dY, dZ) = (y*sin(slope),
+    y*cos(slope)) relative to the rotation center, i.e. before the
+    z_anchor translate. After translating by (x_offset, wall_y_at_z(
+    z_anchor), z_anchor):
+
+        world Z = z_anchor + y*cos(slope)
+        world Y = wall_y_at_z(z_anchor) + y*sin(slope)
+                = z_anchor*tan(slope) + y*sin(slope)
+
+    and wall_y_at_z(world Z) = (z_anchor + y*cos(slope)) * tan(slope)
+                              = z_anchor*tan(slope) + y*sin(slope)
+
+    which is exactly world Y above, for every y - so the whole local
+    Z=0 face sits flush on the sloped wall regardless of how tall the
+    shape is along local Y (x_offset is a pure X translate, untouched by
+    an X-axis rotation, so it doesn't affect this proof). This is the
+    same trick (and the same proof) the removed emboss_label() used to
+    place embossed text flush on this wall; make_nameplate_slot_cutter /
+    make_nameplate_tail / _nameplate_plaque_shape all share this one
+    helper so they can't drift apart."""
+    solid = solid.rotate(App.Vector(0, 0, 0), App.Vector(1, 0, 0),
+                          90 - p["front_slope_deg"])
+    y_wall = wall_y_at_z(p, z_anchor)
+    return solid.translate(App.Vector(x_offset, y_wall, z_anchor))
 
 
-def text_solid(txt, font, size, thickness):
-    shapes = Part.makeWireString(txt, font, size, 0.0)
-    faces = [Part.Face(w) for group in shapes for w in group]
-    comp = Part.Compound(faces)
-    return comp.extrude(App.Vector(0, 0, thickness))
+def make_nameplate_slot_cutter(p):
+    """Dovetail-GROOVE cutter for a template's sloped front wall - vertical
+    (open at the top, i.e. the +local-Y/up-the-slope end; closed at the
+    bottom, local Y=0, where nameplate_zone_z anchors the resting stop) so
+    the nameplate can be pressed down along the wall's own slope to seat
+    and lifted back up to remove - the same press-down mechanic as the
+    piece-to-piece dovetail, just constrained to the sloped surface instead
+    of true vertical, since that is what actually matches this wall's own
+    geometry (see _place_on_wall's docstring).
+
+    outward=False (tip at local Z = -nameplate_dt_depth) because local -Z
+    is the direction INTO the template's own solid (local +Z maps to the
+    wall's outward normal - see _nameplate_dt_profile) - the cavity must
+    carve into real material, not out into the air in front of the wall.
+    nameplate_dt_clearance only widens the neck/tip (lateral clearance);
+    depth is unclearanced, matching the piece-to-piece dovetail's own
+    dt_clearance convention (clearance is per-side lateral, not extra
+    depth).
+
+    Positioned where the old embossed label used to sit: centered on the
+    wall in X (base_w/2) and anchored at nameplate_zone_z in Z (see
+    PARAMS's comment on that value).
+
+    The cutter's local-Y extent is deliberately taller than nameplate_h +
+    nameplate_slot_open_h (the plaque's actual assembled span plus its
+    intended slide-in allowance): if the cutter stopped exactly there, its
+    own far (local Y=total_h) end-cap face would become a real exposed
+    "ceiling" on the cut template - a blind-hole top, not a genuinely open
+    one - with a world normal (0, -sin(slope), -cos(slope)), i.e.
+    substantially DOWNWARD-facing, a true unsupported-bridge overhang.
+    Confirmed live: the first version of this function (extruding exactly
+    to nameplate_h + nameplate_slot_open_h) produced exactly this - an
+    8.1mm2 flat overhang on both templates, caught by check_printability,
+    at the cavity's own top end (zmin~7.83mm, matching that end's
+    location). Overshooting the top well past where the wall's own
+    material ends (base_h) removes that ceiling entirely - the excess cut
+    falls outside the base block (no material there to cut, a no-op),
+    exactly like the piece-to-piece groove cutter's own "+2" overshoot
+    past base_h (see make_dovetail_groove_cutter). The bottom end
+    (local Y=0) is NOT overshot - that is the deliberate closed-bottom
+    stop the tail rests against, and must stay exactly at nameplate_zone_z
+    for the mechanism to work."""
+    face = _nameplate_dt_profile(p, outward=False,
+                                  clearance=p["nameplate_dt_clearance"])
+    open_h = p["nameplate_h"] + p["nameplate_slot_open_h"]
+    # Local-Y distance from nameplate_zone_z needed for the cutter's world
+    # Z to clear base_h (where the wall's own material ends), plus a 5mm
+    # buffer - see docstring above for why this must clear base_h rather
+    # than just open_h.
+    slope_rad = math.radians(p["front_slope_deg"])
+    to_clear_wall = (p["base_h"] - p["nameplate_zone_z"]) / math.cos(slope_rad) + 5.0
+    total_h = max(open_h, to_clear_wall)
+    solid = face.extrude(App.Vector(0, total_h, 0))
+    return _place_on_wall(p, solid, p["nameplate_zone_z"],
+                           x_offset=p["base_w"] / 2.0)
 
 
-def _hole_cross_section_width(face, axis, samples=48):
-    """Widest real cross-section of `face` measured perpendicular to
-    `axis`, via exact boolean intersection with a thin scan strip - not a
-    bounding-box proxy. `axis="y"` sweeps `samples` horizontal strips
-    across the face's own Y range and measures each one's X extent: a
-    literal "horizontal cross-section slice ... gap between solid
-    segments" width, since `face` here IS the counter/hole shape itself -
-    its width at a given slice is exactly the void gap the surrounding ink
-    has to keep open there, the thing a nozzle tracing that Z-layer
-    actually has to resolve. `axis="x"` is the same idea rotated 90
-    degrees, for the vertical direction.
+def _nameplate_tail_local(p):
+    """The nameplate's dovetail tail in the native, unrotated local frame:
+    X centered on 0 (width across the plaque), Y in [0, nameplate_h] (the
+    plaque's own height/slide-axis extent), Z protruding from the
+    plaque's back (root near Z=+FUSE_EMBED, tip at Z=-nameplate_dt_depth -
+    see _nameplate_dt_profile). Single source of truth for the tail's
+    shape - make_nameplate_tail (rotated onto the wall, for fit-checking
+    against the template) and make_nameplate (the exported, print-
+    oriented piece) both build on this exact same geometry, just placed
+    differently in space.
 
-    Not the same measurement as `face.BoundBox.XLength`: the box's
-    X-extent is the distance between the shape's overall leftmost and
-    rightmost points, which need not occur at the same Y (an italic or
-    lopsided counter, for instance) - this instead asks "how wide is the
-    shape when actually sliced at each of these heights". For the roughly
-    convex, upright digit counters this file's font (Arial Bold) produces,
-    the two numbers land within a thousandth of a mm of each other -
-    confirmed live - but this is the real measurement, not a proxy that
-    merely happens to agree with one.
-    """
-    bb = face.BoundBox
-    eps = 1e-4
-    best = 0.0
-    if axis == "y":
-        lo, hi = bb.YMin, bb.YMax
-    else:
-        lo, hi = bb.XMin, bb.XMax
-    for i in range(samples):
-        pos = lo + (hi - lo) * (i + 0.5) / samples
-        if axis == "y":
-            strip = Part.makePlane(bb.XLength + 2, eps,
-                                    App.Vector(bb.XMin - 1, pos - eps / 2.0, 0))
-        else:
-            strip = Part.makePlane(eps, bb.YLength + 2,
-                                    App.Vector(pos - eps / 2.0, bb.YMin - 1, 0))
-        inter = face.common(strip)
-        if inter.Area > 1e-9:
-            w = (inter.BoundBox.XLength if axis == "y"
-                 else inter.BoundBox.YLength)
-            if w > best:
-                best = w
-    return best
+    root_embed=FUSE_EMBED pushes the tail's root FUSE_EMBED past local
+    Z=0 into where the plaque box's own solid will be (_nameplate_plaque_
+    local spans local Z in [-FUSE_EMBED, nameplate_t]), for a genuine
+    tail/plaque fuse overlap - the same zero-gap-tangent-fuse concern as
+    everywhere else in this file. The tip (what actually has to fit
+    inside the template's slot cavity) is untouched by root_embed - only
+    the root moves."""
+    face = _nameplate_dt_profile(p, outward=False, root_embed=FUSE_EMBED)
+    return face.extrude(App.Vector(0, p["nameplate_h"], 0))
 
 
-def narrowest_counter_width(text, font, size):
-    """Real measured width (mm) of the tightest interior counter/aperture
-    across every character of `text`, or None if no character in `text`
-    encloses one at all (e.g. "1", "12", "3/8" have no closed loop in this
-    font).
-
-    Part.makeWireString(text, font, size, 0.0) returns one group of wires
-    per character; a character with a counter (0, 4, 6, 8, 9 among this
-    file's digits - see check_label_legibility's printed report for which
-    ones actually appear in the size table and how wide each measures) has
-    2+ wires: wires[0] is the glyph's OUTER ink silhouette, wires[1:] are
-    its interior hole(s).
-
-    Both of the following were verified live and matter for why this
-    function measures `Part.Face(hole_wire)` directly rather than
-    inspecting the solid text_solid()/emboss_label() actually build:
-    Part.Face(wires[0]) ALONE - which is exactly what those functions
-    construct, one independent Face per wire with no boolean between them
-    - is a solid disc with NO hole cut into it (isInside() at the hole's
-    own center returns True), and Face(wires[0]).common(Face(hole_wire))
-    exactly equals the hole face's own volume (the "hole" region is
-    already fully "inside" wires[0]'s own Face). So the label geometry
-    this file actually prints has no real B-rep hole anywhere in it - what
-    makes a digit's counter print as an open loop instead of a filled
-    blob is a slicer's own even-odd fill rule over the mesh's contour
-    loops at each Z-layer, not this file's OCC solids. Measuring
-    Part.Face(hole_wire) directly - the same shape a slicer's even-odd
-    rule treats as the void - is therefore the real, print-relevant thing
-    to measure, not a stand-in for something else.
-
-    For each hole wire, the counter width is
-    min(cross-section scanned across Y, cross-section scanned across X) -
-    the narrower of the two scan directions, matching PARAMS["label_h"]'s
-    own "the counter's narrower dimension" framing from the original
-    by-hand investigation (see _hole_cross_section_width). The result for
-    `text` is the minimum across every hole in every character - the
-    single tightest spot the whole label text has to resolve.
-    """
-    shapes = Part.makeWireString(text, font, size, 0.0)
-    narrowest = None
-    for group in shapes:
-        if len(group) < 2:
-            continue
-        for hole_wire in group[1:]:
-            hole_face = Part.Face(hole_wire)
-            w = min(_hole_cross_section_width(hole_face, "y"),
-                    _hole_cross_section_width(hole_face, "x"))
-            if narrowest is None or w < narrowest:
-                narrowest = w
-    return narrowest
+def make_nameplate_tail(p):
+    """The nameplate's dovetail tail, ASSEMBLED (rotated/translated onto
+    the sloped wall, matching make_nameplate_slot_cutter's own placement)
+    - what check_nameplate_fit measures containment/collision for, and
+    what check_fuse_overlaps fuses against _nameplate_plaque_shape(p) to
+    confirm the tail/plaque join. This is NOT the orientation that gets
+    exported - see make_nameplate's docstring for why the exported piece
+    uses a different, print-friendly placement of this same design
+    geometry (_nameplate_tail_local)."""
+    return _place_on_wall(p, _nameplate_tail_local(p),
+                           p["nameplate_zone_z"], x_offset=p["base_w"] / 2.0)
 
 
-def emboss_label(p, text, embed=None):
-    """Text solid, laid flat, rotated to sit on the sloped front wall,
-    positioned centered in X, standing proud by label_depth.
-
-    `embed` overrides `p["label_embed"]` for the back-face push described
-    below (still capped by label_depth). Pass the per-label-text depth
-    computed by per_label_multicolor_embed() (starting from
-    `p["label_embed_multicolor"]` as its floor) here when building the label
-    for the UNFUSED multi-color 3MF export (see export_multicolor_3mf /
-    generate_all_parts_multicolor) - that path never booleans body and label
-    together, so it doesn't need label_embed's larger OCC-fuse-validity
-    margin, and using the full 0.2mm there puts visibly-overlapping
-    same-position volume under two different filament assignments (confirmed
-    via test print: a white seam traced around the label outline in Bambu
-    Studio's slice preview). A flat `p["label_embed_multicolor"]` for every
-    label undershoots this same way for narrow-stroke digits like "1"/"7" -
-    see per_label_multicolor_embed()'s docstring. Leave `embed` as None (the
-    default) for the fused single-color path (make_middle_piece), which
-    still needs the full label_embed margin - see below.
-
-    make_base's front wall leans back in +Y as it rises: at height Z the
-    wall surface sits at Y = wall_y_at_z(p, Z) (see make_base's wedge cut,
-    which uses the same helper). text_solid() builds the text flat in the
-    local X-Y plane (X = reading
-    direction, Y = glyph height above the baseline) and extrudes it along
-    local +Z by `thickness`, so local Z=0 is the back face (meant to sit
-    flush on the wall) and local Z=thickness is the raised front face.
-
-    Rotating that solid by (90 - slope) degrees about the X axis maps:
-      - local +Y (glyph height / "up") -> world (sin(slope), cos(slope))
-        in (Y, Z), i.e. "up the slope" - right-side up, not mirrored
-        (X, the reading direction, is untouched by an X-axis rotation).
-      - local +Z (extrusion/thickness) -> world (-cos(slope), sin(slope))
-        in (Y, Z), which is exactly the wall's outward-facing normal, so
-        the text stands proud OFF the wall rather than being buried in it.
-
-    After rotation, translating the back face (local Z=0) to
-    Y = wall_y_at_z(p, label_z), Z = label_z lands every point of that
-    back face exactly on the wall plane (Y = wall_y_at_z(p, Z) for all
-    Z), for any glyph height - not just the baseline - so the label sits
-    flush against the sloped face with its raised face pointing outward.
-
-    The label is a Compound of one solid per glyph (see text_solid), each
-    landing its own back face on the wall plane. Fusing a Compound whose
-    back faces are exactly coincident (zero-gap tangent) with the base's
-    wall face is a known OCC boolean edge case that produces invalid,
-    non-manifold results - confirmed here: fusing at zero overlap gave
-    `fused.isValid() == False`. So the back face is pushed
-    `p["label_embed"]` past the wall plane (into the solid, along the
-    wall's inward normal, capped by label_depth) before rotation,
-    guaranteeing genuine volumetric overlap for the fuse in
-    make_middle_piece while the front (proud) face stays at the full
-    label_depth standoff.
-    """
-    font = pick_font()
-    embed = p["label_embed"] if embed is None else embed
-    embed = min(embed, p["label_depth"])
-    solid = text_solid(text, font, p["label_h"], p["label_depth"] + embed)
-    solid = solid.translate(App.Vector(0, 0, -embed))
-    bb = solid.BoundBox
-    solid = solid.translate(App.Vector(-(bb.XMin + bb.XLength / 2.0), 0, 0))
-    solid = solid.rotate(App.Vector(0, 0, 0), App.Vector(1, 0, 0), 90 - p["front_slope_deg"])
-    x_center = p["base_w"] / 2.0
-    y_wall = wall_y_at_z(p, p["label_z"])
-    solid = solid.translate(App.Vector(x_center, y_wall, p["label_z"]))
-    return solid
+def _nameplate_plaque_local(p):
+    """The flat blank plaque box (no tail) in the native, unrotated local
+    frame - see _nameplate_tail_local's docstring for the shared X/Y/Z
+    convention. Spans local Z in [-FUSE_EMBED, nameplate_t] rather than
+    [0, nameplate_t] - the same FUSE_EMBED push local Z=0 gets everywhere
+    else in this file (see make_post's docstring) - so the plaque's own
+    back face has genuine volumetric overlap with the template's solid
+    wall material OUTSIDE the narrow dovetail cavity (the cavity only
+    removes a few mm2 in the middle of the plaque's much larger footprint
+    - see make_nameplate_slot_cutter) when a nameplate is fused onto a
+    slot-cut template in build_nameplate_coupon."""
+    w, h, t = p["nameplate_w"], p["nameplate_h"], p["nameplate_t"]
+    return box(w, h, t + FUSE_EMBED, -w / 2.0, 0, -FUSE_EMBED)
 
 
-def make_middle_piece_parts(p, drive, label_text, label_embed=None):
-    """(body_without_label, label_only) as two separate solids, in the
-    exact same coordinate frame make_middle_piece fuses them in - i.e. no
-    relative offset between the two. That's what makes the multi-color
-    export work: a slicer that imports both files places them already
-    aligned, so assigning each a different filament/color reproduces the
-    single fused piece in two colors.
+def _nameplate_plaque_shape(p):
+    """The plaque box, ASSEMBLED (rotated/translated onto the sloped
+    wall) - what make_nameplate_tail(p) fuses against for the plaque/tail
+    fuse self-check (check_fuse_overlaps), and what a template's own
+    solid gets fused against (via _nameplate_assembled) in build_
+    nameplate_coupon. NOT the exported orientation - see make_nameplate."""
+    return _place_on_wall(p, _nameplate_plaque_local(p),
+                           p["nameplate_zone_z"], x_offset=p["base_w"] / 2.0)
 
-    This is the single source of truth for the base/post/dovetail
-    construction; make_middle_piece is just this plus a fuse, so the
-    fused single-color piece (used for every self-check, fit coupon, and
-    the plain combined export) and the split multi-color pair can never
-    drift apart.
 
-    `label_embed` is forwarded to emboss_label as its `embed` override
-    (None, the default, means "use p['label_embed']" - see emboss_label).
-    Every caller that needs the fused single-color piece's label geometry
-    (make_middle_piece, generate_all_parts) must leave this as None. The
-    multi-color path does NOT go through this parameter at all -
-    generate_all_parts_multicolor reuses this function's `body` output
-    unchanged (body doesn't depend on the label's embed) but rebuilds the
-    label separately via per_label_multicolor_embed(), which needs a
-    different embed PER DISTINCT LABEL TEXT (not one shared override value)
-    - see that function's docstring for why."""
+def _nameplate_assembled(p):
+    """The complete nameplate (plaque + tail), ASSEMBLED at its real
+    mounted position/orientation against a template's front wall - used
+    by build_nameplate_coupon and check_nameplate_fit's connectivity/
+    footprint checks. This is NOT what gets exported as nameplate_
+    template - see make_nameplate's docstring for why the export uses a
+    different, print-friendly orientation of this exact same design
+    geometry."""
+    return _nameplate_plaque_shape(p).fuse(make_nameplate_tail(p))
+
+
+def make_nameplate(p):
+    """Blank plaque, front face genuinely flat/blank - the user adds their
+    own text with their slicer's text tool after importing (see module
+    docstring). Has a dovetail TAIL on its back matching make_nameplate_
+    slot_cutter's groove - built from the exact same local tail/plaque
+    geometry as the ASSEMBLED nameplate used for fit-checking (see
+    _nameplate_assembled), just placed differently here.
+
+    Unlike every OTHER piece/coupon in this file (which export in their
+    real assembled orientation - templates stand upright as printed,
+    build_dovetail_coupon exports two upright fused pieces, not laid
+    down), the nameplate's real assembled orientation is tilted ~70
+    degrees off vertical (matching the wall's 20-degree-off-vertical
+    slope) with a thin (nameplate_t=2mm) cross-section - a genuinely bad
+    print orientation: the thin dimension ends up spread mostly across
+    world Y rather than stacked in Z, and the plaque's own flat back is
+    suspended in mid-air above the bed except where the tail happens to
+    touch it. Confirmed live: exporting the assembled orientation
+    directly produced a real ~45mm2 unplanned flat overhang (genuine
+    unsupported bridging), caught by check_printability on the first
+    attempt at this geometry.
+
+    So the EXPORTED piece instead uses the native, unrotated local frame
+    (_nameplate_tail_local / _nameplate_plaque_local), then flips 180
+    degrees about X so the plaque's flat back rests on the bed (the
+    piece's own global Z minimum) with the tail pointing straight up as a
+    short raised nub - an ordinary, well-supported FDM shape at this
+    scale. This only changes the piece's placement/orientation in space;
+    the design geometry itself (tail/plaque dimensions and their
+    relationship to each other) is identical to what check_nameplate_fit
+    and build_nameplate_coupon verify against the template."""
+    design = _nameplate_plaque_local(p).fuse(_nameplate_tail_local(p))
+    flipped = design.rotate(App.Vector(0, 0, 0), App.Vector(1, 0, 0), 180)
+    bb = flipped.BoundBox
+    return flipped.translate(App.Vector(0, -bb.YMin, -bb.ZMin))
+
+
+def make_template(p, drive):
+    """Blank template piece: base + drive-specific post + the unchanged
+    piece-to-piece dovetail tail/groove (for joining templates and caps
+    into a row) + a small dovetail GROOVE cut into the front wall where
+    the old embossed label used to sit, for a nameplate to slide into.
+
+    NO baked text anywhere. `drive` is the only thing that varies between
+    the two templates - the post's cross-section (see PARAMS's comment on
+    drive_af_nominal), not the socket size, which no longer has any effect
+    on this piece's geometry at all (see module docstring)."""
     body = make_base(p).fuse(make_post(p, drive))
     body = body.fuse(make_dovetail_tail(p))
     body = body.cut(make_dovetail_groove_cutter(p))
-    label = emboss_label(p, label_text, embed=label_embed)
-    return body, label
-
-
-def make_middle_piece(p, drive, label_text):
-    body, label = make_middle_piece_parts(p, drive, label_text)
-    return body.fuse(label)
+    body = body.cut(make_nameplate_slot_cutter(p))
+    return body
 
 
 # --------------------------------------------------------------------------
@@ -906,20 +688,17 @@ def make_cap(p, side):
     the final cap after cutting it from body) silently splits into 2
     disconnected Solids at that pinch point - both cap_start and cap_end
     tessellated as `mesh NON-MANIFOLD; mesh not solid` until this was
-    caught by Task 8's watertight() check (no prior task asserted
-    Solids-count on the caps specifically, only on the dovetail coupon).
-    Pulling the far edge in by FUSE_EMBED keeps it strictly inside the
-    cylinder everywhere, so there's no leftover sliver at the pinch
-    latitude to disconnect - real, if imperceptible (0.1mm on an 8mm
-    radius), overlap instead of a zero-gap tangent touch.
+    caught by watertight(). Pulling the far edge in by FUSE_EMBED keeps it
+    strictly inside the cylinder everywhere, so there's no leftover sliver
+    at the pinch latitude to disconnect - real, if imperceptible (0.1mm on
+    an 8mm radius), overlap instead of a zero-gap tangent touch.
 
     Unlike the post/tail fuses, this defect happens to still get caught by
-    watertight() at FUSE_EMBED=0 (the caps have no post/label fuses ahead
-    of it to mask the resulting NON-MANIFOLD mesh) - but that is incidental
-    to this cut's specific topology, not something to rely on in general;
-    see SELF_INTERSECT_TOL's docstring. check_cap_corner_solid() below
-    checks the same thing directly, via raw B-rep Solids count on the
-    finished cap body, with no meshing involved.
+    watertight() at FUSE_EMBED=0 (the caps have no post fuse ahead of it
+    to mask the resulting NON-MANIFOLD mesh) - but that is incidental to
+    this cut's specific topology, not something to rely on in general.
+    check_cap_corner_solid() below checks the same thing directly, via raw
+    B-rep Solids count on the finished cap body, with no meshing involved.
     """
     if side not in ("start", "end"):
         raise ValueError("side must be 'start' or 'end', got %r" % side)
@@ -943,219 +722,21 @@ def make_cap(p, side):
 
 
 # --------------------------------------------------------------------------
-# Size table iteration
+# Piece set
 # --------------------------------------------------------------------------
 
-def _middle_piece_specs(p):
-    """Yields (name, drive, label_text, nominal_mm) for all 59 middle
-    pieces (not the 2 caps, which have no label). Single source of truth
-    for the name/drive/label/size mapping - shared by generate_all_parts
-    (and through it generate_all), check_label_legibility, and
-    check_socket_od_clearance, plus run()'s expected piece count (via
-    len(list(_middle_piece_specs(p)))). None of those can silently
-    diverge on which pieces exist, what they're named, or what nominal
-    bore size (mm) each one represents, because they all read it off this
-    one generator instead of independently re-encoding the category
-    structure from PARAMS.
-
-    Three size categories, matching the user's photographed socket trays
-    (their 3/8" drive tray runs 6-22mm metric / 5/16-1in SAE; their 1/2"
-    drive tray runs the same low end up through 25mm metric, with no
-    SAE-only sizes at the top):
-
-      - metric_mm_3_8in_only (6-7mm): below what 1/2" drive needs, so
-        "3-8in" only.
-      - metric_mm (8-22mm) and sae_frac_32nds (5/16-1in): common to both
-        drives, so one piece per size per drive.
-      - metric_mm_1_2in_only (23-25mm): real socket sets don't typically
-        sell sizes that large in 3/8" drive, so "1-2in" only. SAE has no
-        equivalent drive-only category any more - the user's 3/8" tray
-        goes all the way to 1in, same as their 1/2" tray.
-
-    metric_categories below is (size list, drives tuple) per category -
-    one loop over that table replaces what used to be three
-    near-identical copy-pasted loops. Adding a 4th category, or changing
-    which drives a category covers, only means editing this table (or the
-    PARAMS lists it reads from) - nowhere else in the file hand-encodes
-    the category structure any more.
-
-    2x1 + 15x2 + 3x1 = 35 metric pieces; 12x2 = 24 SAE pieces (all
-    common). 35 + 24 = 59 middle pieces total."""
-    metric_categories = [
-        (p["metric_mm_3_8in_only"], ("3-8in",)),
-        (p["metric_mm"], tuple(p["drives"])),
-        (p["metric_mm_1_2in_only"], ("1-2in",)),
-    ]
-    for sizes, drives in metric_categories:
-        for mm in sizes:
-            for drive in drives:
-                yield ("metric_%dmm_%s" % (mm, drive), drive, str(mm),
-                       float(mm))
-
-    sae_categories = [(p["sae_frac_32nds"], tuple(p["drives"]))]
-    for sizes, drives in sae_categories:
-        for n32 in sizes:
-            label = sae_label(n32)
-            key = sae_key(n32)
-            nominal_mm = n32 / 32.0 * 25.4
-            for drive in drives:
-                yield "sae_%s_%s" % (key, drive), drive, label, nominal_mm
-
-
-def generate_all_parts(p):
-    """Returns {name: (body_without_label, label_only)} for the 59 middle
-    pieces only - NOT the 2 caps, which never call emboss_label (see
-    make_cap) and so have nothing to split. This is the basis for the
-    multi-color _body/_label export pair."""
-    return {name: make_middle_piece_parts(p, drive, label_text)
-            for name, drive, label_text, _nominal_mm in _middle_piece_specs(p)}
-
-
-def per_label_multicolor_embed(p, body, label_text, target=MC_TARGET_OVERLAP_MM3):
-    """Push-in depth (mm), body/label overlap (mm3), and the built label
-    solid for `label_text`'s multi-color label, computed PER LABEL TEXT so
-    every label reaches `target` overlap with `body` - instead of using one
-    flat p["label_embed_multicolor"] depth for every label regardless of how
-    much material that glyph actually puts at the wall.
-
-    Why per-label: the same push-in depth produces wildly different contact
-    volume depending on the glyph. "1" and "7" (the simplest, narrowest
-    strokes) leave far less contact footprint than a wide label like "9/16"
-    at the identical depth. A real Bambu Studio import of metric_7mm_3-8in
-    and sae_1in_3-8in (labels "7" and "1") showed exactly this: the label
-    floating, disconnected from the body. Confirmed root cause: at the old
-    flat p["label_embed_multicolor"]=0.03mm depth, "1"/"7" measure only
-    ~0.22-0.25mm3 overlap - small enough for independent per-object mesh
-    tessellation noise to erase the connection in the exported mesh even
-    though the B-rep genuinely touches (distToShape == 0). Raising the embed
-    uniformly to fix that would push wide labels back toward the ~1.69mm3+
-    overlap that caused a real, separately-confirmed visible print seam
-    earlier in this project's history (see
-    PARAMS["label_embed_multicolor"]'s comment) - there is very little
-    headroom (at 0.03mm, "5/16" is already at ~1.19mm3). So each label text
-    gets its own depth: a label that already clears `target` at the base
-    p["label_embed_multicolor"] depth is left there untouched (no added seam
-    risk for labels that don't need it); a label below target gets pushed
-    deeper, only as deep as its own geometry needs, capped at
-    MC_EMBED_CAP_MM.
-
-    Method: overlap volume vs. push-in depth for a FIXED glyph is a smooth,
-    real geometric relationship (more push-in monotonically buries more of
-    the glyph's own cross-section into the wall - verified live to be
-    linear to within float noise across the whole 0.03-0.15mm range used
-    here), NOT an extrapolation across different physical objects the way
-    estimated_socket_od_mm()'s two-point model is (that one is explicitly
-    flagged as unreliable outside its anchor range; this is a local fit for
-    one fixed shape, reliable across the range actually used - see
-    MC_EMBED_FIT_SAMPLE's comment). So a cheap 2-point local linear fit
-    suffices instead of iterative binary search: measure real overlap at the
-    base embed and at MC_EMBED_FIT_SAMPLE, fit a line through those two real,
-    B-rep-measured points, solve for the depth that lands on `target`, then
-    verify with one direct measurement at the solved depth - refitting once
-    more from the two most recent points if that verification isn't yet at
-    target (in practice, verified live, the first fit already lands within
-    ~1e-7mm3 of `target` for every label text in the size table, so this
-    refinement never actually triggers on real data - it exists as a safety
-    net, not because it's needed here)."""
-    base = p["label_embed_multicolor"]
-
-    def sample(embed):
-        label = emboss_label(p, label_text, embed=embed)
-        return embed, label, body.common(label).Volume
-
-    def solve(ea, va, eb, vb):
-        # Linear fit through the two most recent real samples, solved for
-        # the embed that lands on `target`, clamped to [base, cap]. Sorts
-        # the two points by embed first - the refit call below passes the
-        # newer (often smaller-embed) point second, and without sorting,
-        # a not-yet-monotonic-looking pair in CALL order would wrongly
-        # trip the degenerate-slope fallback even though the two points
-        # are perfectly good (and monotonic) once ordered by embed. Falls
-        # back to the cap rather than dividing by a ~zero/negative slope
-        # only for a genuinely degenerate/non-monotonic pair (not expected
-        # for this smooth a relationship, but this must never raise or
-        # return something outside the valid range).
-        if eb < ea:
-            ea, va, eb, vb = eb, vb, ea, va
-        if eb <= ea or vb <= va:
-            return MC_EMBED_CAP_MM
-        slope = (vb - va) / (eb - ea)
-        return max(base, min(MC_EMBED_CAP_MM, ea + (target - va) / slope))
-
-    e0, label0, v0 = sample(base)
-    if v0 >= target:
-        return e0, v0, label0
-
-    e1, label1, v1 = sample(MC_EMBED_FIT_SAMPLE)
-
-    embed = solve(e0, v0, e1, v1)
-    embed, label, overlap = sample(embed)
-
-    if overlap < target and embed < MC_EMBED_CAP_MM - 1e-9:
-        # First fit came up short (or the cap clamped it before it could
-        # reach target) - refit once more from the two most recent real
-        # points and verify again.
-        embed = solve(e1, v1, embed, overlap)
-        embed, label, overlap = sample(embed)
-
-    return embed, overlap, label
-
-
-def generate_all_parts_multicolor(p, parts):
-    """Returns {name: (body_without_label, label_only)} for the 59 middle
-    pieces, for the UNFUSED multi-color 3MF export specifically
-    (export_multicolor_3mf's caller in run()) - NOT for the fused
-    single-color path, which must keep using generate_all_parts's
-    full-label_embed label unchanged.
-
-    Reuses each piece's `body` straight from `parts` (as returned by
-    generate_all_parts) rather than rebuilding the base/post/dovetail
-    geometry a second time - body doesn't depend on the label's embed
-    depth at all, only the label does. Only the label is rebuilt, via
-    per_label_multicolor_embed() (itself built on the same emboss_label()
-    used everywhere else) rather than a single flat
-    p['label_embed_multicolor'] depth for every label - see
-    per_label_multicolor_embed's docstring for why a flat depth
-    reintroduces the exact floating-label defect for narrow-stroke digits
-    like "1"/"7".
-
-    The per-label embed/overlap/label solve is cached by `label_text`
-    (`embed_by_text`) and computed once per DISTINCT text rather than once
-    per piece - many piece names share a label text (e.g. "12" is both
-    metric_12mm_1-2in and metric_12mm_3-8in, same as
-    check_label_legibility's dedup), and the overlap doesn't depend on
-    drive (only p["label_embed_multicolor"]/body's wall geometry, which is
-    the same sloped-front-wall geometry regardless of drive - verified
-    live: identical overlap for the same label text built against a
-    3-8in-drive body and a 1-2in-drive body), so solving it twice per
-    distinct text would be pure duplicated boolean work."""
-    embed_by_text = {}
-    out = {}
-    for name, drive, label_text, _nominal_mm in _middle_piece_specs(p):
-        body, _unused_full_embed_label = parts[name]
-        if label_text not in embed_by_text:
-            embed_by_text[label_text] = per_label_multicolor_embed(
-                p, body, label_text)
-        _embed, _overlap, label = embed_by_text[label_text]
-        out[name] = (body, label)
-    return out
-
-
 def generate_all(p):
-    """Returns {name: shape} for every middle piece and both caps - the
-    fused single-solid pieces used for every self-check, the fit coupons,
-    and the plain single-color export (all unchanged from before
-    multi-color support was added).
-
-    Built on top of generate_all_parts() rather than re-deriving each
-    piece's base/post/dovetail/label geometry, so a caller that needs both
-    the fused pieces and the split parts (see run()) can build the parts
-    once and fuse them locally instead of constructing every piece's
-    geometry twice."""
-    parts = generate_all_parts(p)
-    out = {name: body.fuse(label) for name, (body, label) in parts.items()}
+    """Returns {name: shape} for exactly the 5 piece types this generator
+    produces: template_3-8in, template_1-2in, cap_start, cap_end,
+    nameplate_template. Single source of truth for the piece set - run()
+    derives its expected-count assertion from len() of this dict rather
+    than a hardcoded number."""
+    out = {}
+    for drive in p["drives"]:
+        out["template_%s" % drive] = make_template(p, drive)
     out["cap_start"] = make_cap(p, "start")
     out["cap_end"] = make_cap(p, "end")
+    out["nameplate_template"] = make_nameplate(p)
     return out
 
 
@@ -1164,16 +745,49 @@ def generate_all(p):
 # --------------------------------------------------------------------------
 
 def build_post_coupon(p, drive):
-    """A single middle piece at a mid-range size, for real-socket test fit."""
-    size = "12" if drive == "1-2in" else sae_label(14)  # 12mm / 7/16in
-    return make_middle_piece(p, drive, size)
+    """A single template, for real-socket test fit. Size no longer matters
+    (every socket of a given drive shares the same post - see module
+    docstring) - only drive does, so this is just make_template unchanged,
+    unlike the old per-size middle piece it used to build."""
+    return make_template(p, drive)
 
 
 def build_dovetail_coupon(p):
-    """Two adjacent middle pieces, pre-assembled, to test the snap by hand."""
-    a = make_middle_piece(p, "3-8in", "10")
-    b = make_middle_piece(p, "3-8in", "11").translate(App.Vector(p["base_w"], 0, 0))
+    """Two adjacent templates, pre-assembled, to test the piece-to-piece
+    snap by hand. Drive doesn't matter for this - the piece-to-piece
+    dovetail geometry is identical regardless of drive - so this uses
+    3-8in arbitrarily."""
+    a = make_template(p, "3-8in")
+    b = make_template(p, "3-8in").translate(App.Vector(p["base_w"], 0, 0))
     return a.fuse(b)
+
+
+def build_nameplate_coupon(p):
+    """One template + one nameplate, pre-assembled and fused into a single
+    printable test object, so the new slot/tail interlock can be
+    physically verified before committing to printing full templates -
+    same "print small coupons first" convention as build_post_coupon /
+    build_dovetail_coupon. Drive doesn't matter (the slot geometry is
+    identical regardless of drive), so this uses 3-8in arbitrarily.
+
+    NOTE, same caveat as build_dovetail_coupon: this fuse succeeds via the
+    plaque's own flat back face touching the template's wall with a
+    genuine FUSE_EMBED overlap OUTSIDE the narrow dovetail cavity (see
+    _nameplate_plaque_shape's docstring), not because the dovetail tail/
+    cavity themselves are forced into contact - by design they have
+    nameplate_dt_clearance of real air gap on the neck/tip sides so the
+    two pieces can actually slide apart by hand. Real interlock fit is
+    verified separately and rigorously by check_nameplate_fit()'s direct
+    B-rep containment/collision checks, not by this fuse succeeding.
+
+    Uses _nameplate_assembled(p) (the wall-mounted orientation), NOT
+    make_nameplate(p) (the print-friendly export orientation) - the two
+    are the same design geometry, just placed differently in space (see
+    make_nameplate's docstring); only the assembled placement actually
+    sits against the template's slot."""
+    template = make_template(p, "3-8in")
+    nameplate = _nameplate_assembled(p)
+    return template.fuse(nameplate)
 
 
 # --------------------------------------------------------------------------
@@ -1256,18 +870,13 @@ def watertight(shape, label):
     into non-manifold edges wherever two bodies touch tangentially.
 
     What this does NOT reliably catch: a zero-gap tangent fuse (e.g.
-    FUSE_EMBED reverted to 0 on make_post/make_dovetail_tail). That defect's
-    mesh self-intersection distance (~0.004-0.014mm, measured live) sits
-    inside SELF_INTERSECT_TOL's tessellation-noise-filtering range for 59 of
-    61 pieces (every middle piece) - only the 2 caps happen to still fail
-    here, and via the tolerance-independent NON-MANIFOLD/not-solid checks,
-    not the distance one. Mesh-tessellation signals are a downstream proxy
-    for geometry, not a geometric fact, and this defect class sits right in
-    the gap between "real crossing" and "tessellation noise" where that
-    proxy can't tell the two apart. See check_fuse_overlap() and
-    check_cap_corner_solid() for the direct, tessellation-independent checks
-    that do catch it.
-    """
+    FUSE_EMBED reverted to 0 on make_post/make_dovetail_tail). Mesh-
+    tessellation signals are a downstream proxy for geometry, not a
+    geometric fact, and that defect class can sit right at the edge of
+    what a mesh self-intersection distance can distinguish from ordinary
+    tessellation noise (see SELF_INTERSECT_TOL). See check_fuse_overlap()
+    and check_cap_corner_solid() for the direct, tessellation-independent
+    checks that do catch it regardless."""
     notes = []
     try:
         shape.check(True)
@@ -1282,8 +891,9 @@ def watertight(shape, label):
     if m.hasNonManifolds():
         notes.append("mesh NON-MANIFOLD")
     if m.hasSelfIntersections():
-        # See SELF_INTERSECT_TOL: only escalate crossings big enough to be a
-        # real overlap, not sub-chord-tolerance tessellation noise.
+        # See SELF_INTERSECT_TOL: only escalate crossings big enough to be
+        # a real overlap, not sub-chord-tolerance tessellation noise from
+        # the post's own chamfer-on-fillet corners.
         worst = max((App.Vector(pt1) - App.Vector(pt2)).Length
                      for _, _, pt1, pt2 in m.getSelfIntersections())
         if worst > SELF_INTERSECT_TOL:
@@ -1318,11 +928,20 @@ def check_structural(p):
     """Minimum-thickness parameter check. Real thickness measurement needs
     a full geometric kernel query; this asserts the *design* numbers stay
     above safe minimums for FDM printing (repo convention: >=1.2mm walls,
-    >=2mm posts/tabs)."""
+    >=2mm posts/tabs). Covers both dovetail scales now - the piece-to-piece
+    connector and the new, lighter-duty nameplate connector - plus the
+    nameplate plaque's own thickness."""
     issues = []
     dt_wall = p["dt_neck_w"] / 2.0
     if dt_wall < 1.2:
         issues.append("dovetail neck %.2fmm below 1.2mm minimum" % dt_wall)
+    nameplate_dt_wall = p["nameplate_dt_neck_w"] / 2.0
+    if nameplate_dt_wall < 1.2:
+        issues.append("nameplate dovetail neck %.2fmm below 1.2mm minimum"
+                       % nameplate_dt_wall)
+    if p["nameplate_t"] < 1.2:
+        issues.append("nameplate thickness %.2fmm below 1.2mm minimum"
+                       % p["nameplate_t"])
     if p["base_h"] < 2.0:
         issues.append("base_h %.2fmm below 2.0mm minimum" % p["base_h"])
     return issues
@@ -1338,20 +957,14 @@ def check_printability(shape, label):
 
 def check_fuse_overlap(base, part, label):
     """Direct geometric guarantee that `part` (a piece meant to fuse INTO
-    `base`, relying on FUSE_EMBED for genuine overlap - e.g. make_post or
-    make_dovetail_tail) actually has positive volumetric overlap with
-    `base` BEFORE the fuse happens.
+    `base`, relying on FUSE_EMBED for genuine overlap) actually has
+    positive volumetric overlap with `base` BEFORE the fuse happens.
 
     This is deliberately NOT a mesh-tessellation proxy. base.common(part)
     is OCC's own exact B-rep boolean intersection - there is no meshing,
     no chord tolerance, nothing for tessellation noise to hide in or be
     confused with. A zero-gap tangent touch (FUSE_EMBED <= 0) has exactly
-    zero shared volume; only a genuine embed does not. This is what
-    catches the class of defect that watertight()'s SELF_INTERSECT_TOL
-    cannot (see its docstring): the ~0.004-0.014mm self-intersection this
-    defect produces sits inside that tolerance's noise-filtering range for
-    every middle piece, so distance-based mesh filtering alone silently
-    passes it."""
+    zero shared volume; only a genuine embed does not."""
     overlap = base.common(part).Volume
     if overlap <= 0.0:
         return ("%s: no volumetric overlap before fuse (%.4f mm3) - "
@@ -1368,20 +981,7 @@ def check_cap_corner_solid(p, side):
     corner sliver out of the cap body silently splits the whole cap into 2
     disconnected Solids there instead of raising an error - confirmed live:
     building the actual cap at FUSE_EMBED=0 gives Solids count 2 (both
-    sides); at the real FUSE_EMBED=0.1 it is 1 for both.
-
-    NOTE: corner.cut(round_cutter) alone (the intermediate rounding
-    sliver) is NOT the right thing to check - it is naturally 2
-    disconnected pieces (the box's near and far corners, split by the arc
-    where the box is inside the cylinder) at every FUSE_EMBED value,
-    including the correct 0.1, so its Solids count doesn't distinguish
-    the defect. It's only once that sliver is cut out of the full,
-    otherwise-connected cap body that a genuine embed keeps the body in
-    one piece while a zero-gap tangent splits it - so this check builds
-    the real cap and inspects its own Solids count, which is a direct
-    fact from OCC's boolean kernel's own topology, no meshing, no
-    distance tolerance, so there is nothing here for tessellation noise
-    to be confused with."""
+    sides); at the real FUSE_EMBED=0.1 it is 1 for both."""
     cap = make_cap(p, side)
     n_solids = len(cap.Solids)
     if n_solids != 1:
@@ -1390,102 +990,11 @@ def check_cap_corner_solid(p, side):
     return None
 
 
-def check_label_legibility(p, parts):
-    """Two checks folded into one report, both keyed off every distinct
-    label text in the size table (many piece names share a text - e.g.
-    "12" is both metric_12mm_1-2in and metric_12mm_3-8in - since neither
-    check below depends on drive, only the string does):
-
-    1. PLACEMENT - every embossed label, built at the current
-       label_h/label_z, stays inside the sloped wall's Z range
-       [0, base_h] and the base's own X footprint [0, base_w]. This is
-       the automated version of the by-hand check done when label_h was
-       raised from 4.0mm to 6.0mm (see PARAMS['label_h']'s comment): a
-       larger glyph size changes both how tall the label sits on the wall
-       (it could poke past base_h at the top, or below Z=0 at the bottom)
-       and how wide it renders (the longest label string in the whole
-       table could run outside base_w). Reading every distinct label
-       text's real BoundBox - not eyeballing one representative piece -
-       is what catches a regression here; label height varies slightly by
-       glyph (e.g. "/" reads slightly taller than bare digits), so the
-       per-text Z margin isn't identical across the table and only a full
-       sweep proves the worst case.
-
-    2. LEGIBILITY - the narrowest interior counter/aperture across every
-       label text's glyphs stays above COUNTER_WIDTH_FLOOR. This is what
-       (1) categorically cannot catch: a label can stay perfectly in
-       bounds while a digit's interior counter shrinks back down to the
-       exact defect a real printed sample (photo) showed - curved strokes
-       blobbing shut into a solid blob instead of resolving as an open
-       loop - because bbox placement has no visibility into what is
-       happening INSIDE the glyph's own silhouette. See
-       narrowest_counter_width() for the real cross-section measurement
-       and COUNTER_WIDTH_FLOOR for the floor's derivation. If label_h or
-       the font is ever tuned again in a way that keeps every label's
-       bbox in-bounds but shrinks a counter back down, this is what
-       catches it - (1) would still pass.
-
-    Reuses each distinct text's already-built label solid straight from
-    `parts` (the {name: (body, label)} dict generate_all_parts() returns,
-    built once in run() before any self-check runs) for check (1), rather
-    than calling emboss_label() again for all 32 distinct texts -
-    confirmed live to reconstruct bit-identical geometry, so rebuilding it
-    a second time here was pure duplicated work, not a correctness need.
-    Check (2) is genuinely new work, not a rebuild of anything already in
-    `parts`: it operates on Part.makeWireString's flat, pre-rotation 2D
-    glyph wires (the same font/size call text_solid() makes internally),
-    not the rotated/positioned/extruded solids `parts` holds - there is
-    nothing there to reuse for it."""
-    seen = set()
-    label_by_text = {}
-    for name, _drive, label_text, _nominal_mm in _middle_piece_specs(p):
-        if label_text in seen:
-            continue
-        seen.add(label_text)
-        label_by_text[label_text] = parts[name][1]
-
-    issues = []
-    for label_text, label_shape in sorted(label_by_text.items()):
-        bb = label_shape.BoundBox
-        if bb.ZMin < -1e-6 or bb.ZMax > p["base_h"] + 1e-6:
-            issues.append(
-                "label %r: Z[%.3f,%.3f] outside wall bounds [0, %.3f]"
-                % (label_text, bb.ZMin, bb.ZMax, p["base_h"]))
-        if bb.XMin < -1e-6 or bb.XMax > p["base_w"] + 1e-6:
-            issues.append(
-                "label %r: X[%.3f,%.3f] outside base width [0, %.3f]"
-                % (label_text, bb.XMin, bb.XMax, p["base_w"]))
-
-    font = pick_font()
-    worst_text, worst_width = None, None
-    for label_text in sorted(label_by_text):
-        width = narrowest_counter_width(label_text, font, p["label_h"])
-        if width is None:
-            continue
-        print("  counter %r: narrowest %.4fmm" % (label_text, width))
-        if worst_width is None or width < worst_width:
-            worst_text, worst_width = label_text, width
-    if worst_width is not None:
-        print("  worst-case counter: %r at %.4fmm (floor %.2fmm)"
-              % (worst_text, worst_width, COUNTER_WIDTH_FLOOR))
-        if worst_width <= COUNTER_WIDTH_FLOOR:
-            issues.append(
-                "label %r: narrowest counter %.4fmm at or below the "
-                "%.2fmm floor - digit counter/aperture too small, would "
-                "blob shut on an FDM printer (the exact defect label_h "
-                "was raised to fix, see PARAMS['label_h'])"
-                % (worst_text, worst_width, COUNTER_WIDTH_FLOOR))
-    return issues
-
-
 def check_fuse_overlaps(p):
     """Runs check_fuse_overlap()/check_cap_corner_solid() across every
-    FUSE_EMBED-dependent boolean in the design. make_post and
-    make_dovetail_tail's geometry does not depend on socket size (only
-    drive, or nothing at all), so one check per drive plus one for the
-    tail covers every one of the 59 middle pieces - they all build the
-    same post/tail geometry that these checks exercise directly. Both caps
-    are checked individually since 'start' and 'end' cut opposite edges."""
+    FUSE_EMBED-dependent boolean in the design: post/base (x2 drives),
+    piece-to-piece dovetail tail/base, both cap corner cuts, and the two
+    nameplate joins (tail-to-plaque, plaque-to-template)."""
     issues = []
     base_shape = make_base(p)
     for drive in p["drives"]:
@@ -1501,49 +1010,43 @@ def check_fuse_overlaps(p):
         issue = check_cap_corner_solid(p, side)
         if issue:
             issues.append(issue)
+
+    issue = check_fuse_overlap(_nameplate_plaque_shape(p),
+                                make_nameplate_tail(p),
+                                "nameplate tail/plaque fuse")
+    if issue:
+        issues.append(issue)
+    issue = check_fuse_overlap(make_template(p, "3-8in"), make_nameplate(p),
+                                "nameplate/template fuse")
+    if issue:
+        issues.append(issue)
     return issues
 
 
 def check_socket_od_clearance(p):
-    """Permanent regression guard for the base footprint resize (see
-    PARAMS["base_w"]/["base_d"]'s comment) - confirms every size in the
-    whole table (metric 6-25mm across all three metric categories, SAE
-    5/16-1in) has its estimated socket body clear the base's own outer
-    edge by at least OD_CLEARANCE_FLOOR, in every direction, using real OCC
-    B-rep booleans rather than the on-paper distance arithmetic in PARAMS's
-    comment. The base footprint doesn't depend on drive, so this sweeps
-    every distinct size once (derived from _middle_piece_specs(p), the
-    single source of truth for the size/category table - see its
-    docstring) rather than trying to guess which drive-scoping category
-    holds the worst case.
+    """Permanent regression guard for the base footprint (see PARAMS's
+    base_w/base_d comment) against the one real worst-case socket size,
+    now that the piece set is size-agnostic templates rather than a
+    per-size table to sweep: 1in SAE (nominal_mm=25.4), whose estimated OD
+    (~35.67mm via estimated_socket_od_mm) is slightly larger than 25mm
+    metric's own measured 35mm point - see SOCKET_OD_POINTS_MM's comment.
+    The base footprint doesn't depend on drive either, so one check covers
+    both templates.
 
-    For each size, builds a real Part.makeCylinder probe of the estimated
-    OD (see estimated_socket_od_mm/SOCKET_OD_POINTS_MM), centered at the
-    post's own (cx, cy) - the same formula make_post uses - spanning the
-    full post height plus headroom, and:
+    Builds a real Part.makeCylinder probe of the estimated OD, centered at
+    the post's own (cx, cy) - the same formula make_post uses - spanning
+    the full post height plus headroom, and:
 
       1. Confirms the probe does not extend past the base's own footprint
          (cyl.cut(footprint_box).Volume == 0) - a true geometric fact, not
-         an inference from BoundBox math, since a rotated/offset shape
-         could in principle disagree with its own bounding box (not the
-         case here, since both are axis-aligned, but this checks the real
-         shape either way).
+         an inference from BoundBox math.
       2. Confirms the probe has zero volumetric overlap with the dovetail
          tail (protrudes outward past +X) and the dovetail groove cutter
-         (cuts into -X) - common(...).Volume == 0 for both - so the widest
-         socket never collides with the interlock geometry on the left/
-         right edges.
+         (cuts into -X) - common(...).Volume == 0 for both.
       3. Computes the real clearance margin in all four directions from
          the probe's own BoundBox against the footprint edges, and asserts
-         the worst (minimum) margin across every size clears
-         OD_CLEARANCE_FLOOR.
-
-    Verified live (see this file's development history) that the true
-    worst case across the whole table is NOT the largest metric size
-    (25mm, measured OD 35mm exactly) but the 1in SAE size (estimated OD
-    ~35.67mm via the linear model, converting 25.4mm nominal through the
-    same two measured points) - which is exactly why this sweeps every
-    size instead of hardcoding one assumed worst case."""
+         it clears OD_CLEARANCE_FLOOR.
+    """
     issues = []
     cx, cy = p["base_w"] / 2.0, p["base_d"] * 0.62
     footprint = Part.makeBox(p["base_w"], p["base_d"], 500,
@@ -1551,112 +1054,131 @@ def check_socket_od_clearance(p):
     tail = make_dovetail_tail(p)
     groove = make_dovetail_groove_cutter(p)
 
-    # Derive the distinct sizes from _middle_piece_specs (like
-    # check_label_legibility does) rather than independently re-deriving
-    # the category structure from PARAMS - that generator is the single
-    # source of truth for which sizes/categories exist. Dedup by
-    # (metric-or-sae, nominal_mm) since the base footprint doesn't depend
-    # on drive, so a size appearing once per drive (the common category)
-    # should only be swept once here.
-    seen_sizes = set()
-    sizes_mm = []
-    for name, _drive, label_text, nominal_mm in _middle_piece_specs(p):
-        is_sae = name.startswith("sae_")
-        key = ("sae", nominal_mm) if is_sae else ("metric", nominal_mm)
-        if key in seen_sizes:
-            continue
-        seen_sizes.add(key)
-        size_label = (("sae %s" % label_text) if is_sae else
-                      ("metric %dmm" % int(nominal_mm)))
-        sizes_mm.append((size_label, nominal_mm))
-
-    worst_label, worst_margin = None, None
-    for size_label, nominal_mm in sizes_mm:
-        od = estimated_socket_od_mm(nominal_mm)
-        r = od / 2.0
-        probe = Part.makeCylinder(r, p["post_h"] + 20,
-                                   App.Vector(cx, cy, p["base_h"]))
-        outside = probe.cut(footprint).Volume
-        if outside > 1e-6:
-            issues.append(
-                "%s (est OD %.2fmm): probe extends %.2f mm3 past the base "
-                "footprint" % (size_label, od, outside))
-        tail_overlap = probe.common(tail).Volume
-        if tail_overlap > 1e-6:
-            issues.append(
-                "%s (est OD %.2fmm): probe overlaps dovetail tail by "
-                "%.4f mm3" % (size_label, od, tail_overlap))
-        groove_overlap = probe.common(groove).Volume
-        if groove_overlap > 1e-6:
-            issues.append(
-                "%s (est OD %.2fmm): probe overlaps dovetail groove cutter "
-                "by %.4f mm3" % (size_label, od, groove_overlap))
-        left = cx - r
-        right = p["base_w"] - cx - r
-        front = cy - r
-        back = p["base_d"] - cy - r
-        margin = min(left, right, front, back)
-        print("  %s: est OD %.2fmm -> clearance margin %.2fmm "
-              "(left=%.2f right=%.2f front=%.2f back=%.2f)"
-              % (size_label, od, margin, left, right, front, back))
-        if worst_margin is None or margin < worst_margin:
-            worst_label, worst_margin = size_label, margin
-
-    if worst_margin is not None:
-        print("  worst-case OD clearance: %s at %.2fmm margin (floor %.2fmm)"
-              % (worst_label, worst_margin, OD_CLEARANCE_FLOOR))
-        if worst_margin <= OD_CLEARANCE_FLOOR:
-            issues.append(
-                "%s: OD clearance margin %.2fmm at or below the %.2fmm "
-                "floor - base footprint too tight for this socket's "
-                "estimated outer diameter" % (worst_label, worst_margin,
-                                               OD_CLEARANCE_FLOOR))
+    nominal_mm = 25.4  # 1in SAE - the true worst case, see module comment
+    od = estimated_socket_od_mm(nominal_mm)
+    r = od / 2.0
+    probe = Part.makeCylinder(r, p["post_h"] + 20,
+                               App.Vector(cx, cy, p["base_h"]))
+    outside = probe.cut(footprint).Volume
+    if outside > 1e-6:
+        issues.append(
+            "1in SAE (est OD %.2fmm): probe extends %.2f mm3 past the base "
+            "footprint" % (od, outside))
+    tail_overlap = probe.common(tail).Volume
+    if tail_overlap > 1e-6:
+        issues.append(
+            "1in SAE (est OD %.2fmm): probe overlaps dovetail tail by "
+            "%.4f mm3" % (od, tail_overlap))
+    groove_overlap = probe.common(groove).Volume
+    if groove_overlap > 1e-6:
+        issues.append(
+            "1in SAE (est OD %.2fmm): probe overlaps dovetail groove cutter "
+            "by %.4f mm3" % (od, groove_overlap))
+    left = cx - r
+    right = p["base_w"] - cx - r
+    front = cy - r
+    back = p["base_d"] - cy - r
+    margin = min(left, right, front, back)
+    print("  1in SAE: est OD %.2fmm -> clearance margin %.2fmm "
+          "(left=%.2f right=%.2f front=%.2f back=%.2f)"
+          % (od, margin, left, right, front, back))
+    if margin <= OD_CLEARANCE_FLOOR:
+        issues.append(
+            "1in SAE: OD clearance margin %.2fmm at or below the %.2fmm "
+            "floor - base footprint too tight for this socket's estimated "
+            "outer diameter" % (margin, OD_CLEARANCE_FLOOR))
     return issues
 
 
-def check_multicolor_overlap(p, multicolor_parts):
-    """Sweeps EVERY distinct label text's multi-color body/label overlap
-    (via body.common(label).Volume, the same real B-rep boolean
-    per_label_multicolor_embed() itself uses) and confirms each clears
-    MC_OVERLAP_FLOOR - the automated regression guard for the per-label
-    adaptive embed in per_label_multicolor_embed()/
-    generate_all_parts_multicolor().
+def check_nameplate_fit(p):
+    """Direct B-rep verification that the nameplate's tail and a
+    template's slot actually interlock when a nameplate is placed at its
+    real assembled position against a template - both built via the exact
+    same rotate/translate math (_place_on_wall), so no extra positioning
+    is needed here beyond building both against the same p. Uses make_
+    nameplate_tail/_nameplate_assembled (the wall-mounted orientation),
+    NOT make_nameplate (the print-friendly export orientation) - see
+    make_nameplate's docstring. Drive doesn't affect any of this
+    geometry, so this checks against one template (3-8in) only, same as
+    build_dovetail_coupon/build_nameplate_coupon.
 
-    Widened from an earlier check that only spot-checked 2 hardcoded piece
-    names (metric_12mm_1-2in, sae_5-16in_3-8in) against a single flat
-    p["label_embed_multicolor"] depth. That narrow sample is exactly what
-    let the real defect through in the first place: neither of those 2
-    pieces' labels ("12", "5/16") is anywhere near the true worst case -
-    "1" and "7" are, and a 2-piece spot-check that happens to miss the
-    worst case can't catch a regression in it. This is the same
-    "check-2-pieces missed the actual worst case" gap
-    check_label_legibility's own history already hit once (see its
-    docstring) - the fix here follows that exact established pattern:
-    dedup by label text via _middle_piece_specs(p) (many piece names share
-    a text, e.g. "12" is both metric_12mm_1-2in and metric_12mm_3-8in) and
-    sweep every distinct one, not a hand-picked subset.
+    All checks are real OCC B-rep booleans, no meshing involved - the same
+    "build real geometry, verify with real booleans" discipline as check_
+    fuse_overlap/check_cap_corner_solid:
 
-    Reuses each label text's already-computed (body, label) pair straight
-    from `multicolor_parts` (as returned by generate_all_parts_multicolor,
-    which already ran per_label_multicolor_embed for every distinct text)
-    rather than recomputing the per-label embed a second time here - this
-    check's only job is confirming what was actually built/exported clears
-    the floor, not re-deriving it."""
-    seen = set()
+      1. CONTAINMENT - the tail (built with no clearance) should sit
+         almost entirely inside the groove cavity (built with
+         nameplate_dt_clearance added to neck/tip) once both are placed at
+         their real assembled positions. Not exactly 100% - a real
+         clearance-fit dovetail is *designed* to be slightly smaller than
+         its cavity so it can physically slide - but a low fraction would
+         mean the two are actually misaligned, not just clearance-loose.
+      2. COLLISION - the tail must not collide with the post or either
+         half of the piece-to-piece dovetail (both 0.0 mm3 overlap
+         expected - they sit far apart in Y, but this checks the real
+         geometry rather than assuming from separation by eye).
+      3. CONNECTIVITY - the assembled coupon (template with slot cut, plus
+         a nameplate fused on) is one single connected solid, not two
+         solids merely touching in the same file.
+      4. FOOTPRINT - the plaque's own X extent stays within the template's
+         base_w, so a future PARAMS change that widens nameplate_w can't
+         silently run the plaque off the edge of the piece without this
+         check catching it (nameplate_h/nameplate_zone_z's Z placement is
+         checked implicitly by (3)'s connectivity requirement and by
+         watertight()/check_structural, since a Z position off the wall
+         entirely would break the flat-back-to-wall contact the fuse in
+         (3) depends on).
+    """
     issues = []
-    for name, _drive, label_text, _nominal_mm in _middle_piece_specs(p):
-        if label_text in seen:
-            continue
-        seen.add(label_text)
-        body, label = multicolor_parts[name]
-        overlap = body.common(label).Volume
-        print("  %r: overlap=%.4f mm3 (target %.2f, floor %.2f)"
-              % (label_text, overlap, MC_TARGET_OVERLAP_MM3, MC_OVERLAP_FLOOR))
-        if overlap <= MC_OVERLAP_FLOOR:
-            issues.append(
-                "label %r: multicolor body/label overlap %.4f mm3 is at or "
-                "below the %.2f mm3 floor - label would not attach or "
-                "margin is negligible" % (label_text, overlap, MC_OVERLAP_FLOOR))
+    template = make_template(p, "3-8in")
+    tail = make_nameplate_tail(p)
+    cavity = make_nameplate_slot_cutter(p)
+    nameplate = _nameplate_assembled(p)
+
+    tail_vol = tail.Volume
+    contained_vol = tail.common(cavity).Volume
+    frac = contained_vol / tail_vol if tail_vol > 0 else 0.0
+    print("  nameplate tail/slot containment: %.4f of %.4f mm3 tail volume "
+          "(%.1f%%)" % (contained_vol, tail_vol, frac * 100))
+    if frac < 0.90:
+        issues.append(
+            "nameplate tail only %.1f%% contained in the template's slot "
+            "cavity (expected >=90%% given nameplate_dt_clearance=%.2fmm "
+            "per side) - tail/slot geometry likely misaligned"
+            % (frac * 100, p["nameplate_dt_clearance"]))
+
+    post = make_post(p, "3-8in")
+    post_overlap = tail.common(post).Volume
+    if post_overlap > 1e-6:
+        issues.append("nameplate tail overlaps the post by %.4f mm3"
+                       % post_overlap)
+    pd_tail_overlap = tail.common(make_dovetail_tail(p)).Volume
+    if pd_tail_overlap > 1e-6:
+        issues.append(
+            "nameplate tail overlaps the piece-to-piece dovetail tail by "
+            "%.4f mm3" % pd_tail_overlap)
+    pd_groove_overlap = tail.common(make_dovetail_groove_cutter(p)).Volume
+    if pd_groove_overlap > 1e-6:
+        issues.append(
+            "nameplate tail overlaps the piece-to-piece dovetail groove "
+            "cutter by %.4f mm3" % pd_groove_overlap)
+
+    coupon = template.fuse(nameplate)
+    n_solids = len(coupon.Solids)
+    print("  nameplate+template coupon: %d solid(s), volume %.1f mm3"
+          % (n_solids, coupon.Volume))
+    if n_solids != 1:
+        issues.append(
+            "nameplate+template coupon: %d disconnected solids (expected "
+            "1) - plaque is not making genuine contact with the template's "
+            "wall" % n_solids)
+
+    bb = nameplate.BoundBox
+    if bb.XMin < -1e-6 or bb.XMax > p["base_w"] + 1e-6:
+        issues.append(
+            "nameplate footprint X[%.3f,%.3f] outside base width [0,%.3f]"
+            % (bb.XMin, bb.XMax, p["base_w"]))
+
     return issues
 
 
@@ -1666,21 +1188,14 @@ def check_multicolor_overlap(p, multicolor_parts):
 
 def export_all(shapes, out_dir, formats=("step", "stl", "3mf")):
     """Export every shape to the given formats (default STEP/STL/3MF),
-    reusing a single scratch document for the whole batch (not one per shape
-    - see the sibling whiteboard-stand/freecad/build_caddy.py's export_all,
-    which avoids a temporary document per export for the same reason:
-    creating/closing a FreeCAD document 55 times is needless churn and keeps
-    this off the GUI thread).
-
-    `formats` lets a caller skip formats it doesn't need (e.g. the
-    _body/_label split export below only wants STEP+STL - the single-object
-    3MF for a body or label alone is redundant now that
-    export_multicolor_3mf() writes both as one combined multi-object 3MF).
+    reusing a single scratch document for the whole batch (not one per
+    shape - creating/closing a FreeCAD document per export is needless
+    churn and keeps this off the GUI thread).
 
     A failure exporting one shape (STEP write, recompute, or mesh write) is
     caught, logged, and does NOT abort the run - the loop still attempts
-    every remaining shape so one bad piece can't hide the state of the other
-    54. Returns the list of shape names that failed; the caller (run())
+    every remaining shape so one bad piece can't hide the state of the
+    others. Returns the list of shape names that failed; the caller (run())
     decides whether that's fatal."""
     os.makedirs(out_dir, exist_ok=True)
     failed = []
@@ -1714,258 +1229,13 @@ def export_all(shapes, out_dir, formats=("step", "stl", "3mf")):
     return failed
 
 
-def export_multicolor_3mf(parts, out_dir):
-    """Export each middle piece's body and label as TWO OBJECTS IN ONE 3MF
-    file (<name>_multicolor.3mf), so a multi-color slicer (Bambu
-    Studio/OrcaSlicer/PrusaSlicer) imports a single file and shows the body
-    and label as two independently-colorable objects at the same position -
-    assign each a different filament/AMS slot. This supersedes the 3MF half
-    of the _body/_label split export above for the multi-color use case (see
-    export_all's `formats` param, used to skip .3mf there).
-
-    Part.export()/Import.export() don't support .3mf in this FreeCAD build
-    (raises "Unknown extension") - only Mesh.export() does, and it accepts a
-    list of Mesh::Feature objects, writing each as its own <object>/<item>
-    entry in the 3MF's 3D/3dmodel.model, at identity transform since world
-    coordinates are already baked into the mesh vertices by fine_mesh().
-    Verified by unzipping a sample output and inspecting the raw XML - don't
-    re-verify by re-importing into FreeCAD, whose Mesh.insert() merges
-    multi-object 3MF back into a single Mesh::Feature on read (a
-    FreeCAD-reader-side simplification, not a sign the file is malformed).
-
-    Reuses a single scratch document for the whole batch, same reasoning as
-    export_all. A failure on one piece is caught, logged, and does not abort
-    the batch. Returns the list of piece names that failed."""
-    os.makedirs(out_dir, exist_ok=True)
-    failed = []
-    doc = App.newDocument("export_multicolor_tmp")
-    try:
-        for name, (body, label) in sorted(parts.items()):
-            body_name = name + "_body_mc"
-            label_name = name + "_label_mc"
-            try:
-                body_obj = doc.addObject("Mesh::Feature", body_name)
-                body_obj.Mesh = fine_mesh(body)
-                label_obj = doc.addObject("Mesh::Feature", label_name)
-                label_obj.Mesh = fine_mesh(label)
-                Mesh.export(
-                    [body_obj, label_obj],
-                    os.path.join(out_dir, name + "_multicolor.3mf"))
-            except Exception as exc:
-                App.Console.PrintWarning(
-                    "multicolor export failed for %r: %s\n" % (name, exc))
-                failed.append(name)
-            finally:
-                for obj_name in (body_name, label_name):
-                    if doc.getObject(obj_name) is not None:
-                        try:
-                            doc.removeObject(obj_name)
-                        except Exception:
-                            pass
-    finally:
-        App.closeDocument(doc.Name)
-    return failed
-
-
-def check_multicolor_3mf_structure(path):
-    """Opens a written `<name>_multicolor.3mf` as a zip and parses
-    3D/3dmodel.model to confirm it actually contains 2 <object> resource
-    entries and 2 <item> build entries - the one structural property the
-    entire multi-color feature depends on (see export_multicolor_3mf's
-    docstring: Mesh.export() is documented/assumed to write each
-    Mesh::Feature passed to it as its own <object>/<item> pair, which is
-    what makes a slicer show body and label as two independently-colorable
-    objects instead of one merged mesh). That assumption was previously
-    "verified by hand via zip/XML inspection" only, with no automated
-    coverage - if a future FreeCAD version changed Mesh.export()'s
-    multi-object behavior, every other assert in run() would still pass
-    and the failure would only surface downstream in someone's slicer.
-    This is the automated version of that same by-hand check, run against
-    a real file on disk after export_multicolor_3mf() has written it.
-
-    Returns (n_objects, n_items) rather than asserting itself, so the
-    caller can report both counts before deciding whether to fail (same
-    style as check_fuse_overlap/check_cap_corner_solid returning a
-    description instead of asserting inline).
-
-    Namespace-agnostic on purpose: 3MF's core namespace is
-    "http://schemas.microsoft.com/3dmanufacturing/core/2015/02", but
-    matching by local tag name (stripping any "{uri}" prefix ElementTree
-    adds) is more robust than hardcoding that URI - it does not care
-    whether a future writer changes the namespace URI or declares a
-    default vs. prefixed namespace, only that the elements are still
-    named <object> and <item> per the 3MF core spec.
-    """
-    import zipfile
-    import xml.etree.ElementTree as ET
-
-    with zipfile.ZipFile(path) as zf:
-        with zf.open("3D/3dmodel.model") as f:
-            root = ET.parse(f).getroot()
-
-    def local_tag(el):
-        tag = el.tag
-        return tag.rsplit("}", 1)[-1] if "}" in tag else tag
-
-    n_objects = sum(1 for el in root.iter() if local_tag(el) == "object")
-    n_items = sum(1 for el in root.iter() if local_tag(el) == "item")
-    return n_objects, n_items
-
-
-def organize_plate_folders(p, out_dir, multicolor_failures):
-    """Groups the already-exported <name>_multicolor.3mf files into 4
-    self-contained "plate" folders under out_dir/plates/ - one per
-    drive+unit-system combo (3-8in metric, 3-8in SAE, 1-2in metric, 1-2in
-    SAE) - so a user can batch-import one folder into their slicer per
-    plate instead of hand-picking files out of the flat exports/
-    directory.
-
-    Must run AFTER export_multicolor_3mf() has already written every
-    <name>_multicolor.3mf to out_dir - this only copies files that exist
-    on disk, it does not build or export anything itself.
-
-    Category comes straight from _middle_piece_specs(p) - the same single
-    source of truth every other per-piece self-check reads from - rather
-    than re-deriving drive/unit-system from PARAMS independently: `drive`
-    is yielded directly, and metric-vs-SAE reads off the name's own
-    "metric_"/"sae_" prefix, the same convention _middle_piece_specs uses
-    to build that name in the first place (see its docstring). The set of
-    plate categories itself is derived from p["drives"] (crossed with the
-    two unit systems, which aren't drive-dependent so hardcoding just
-    "metric"/"sae" is fine) rather than a hand-encoded list of drive
-    strings, so adding/removing a drive in PARAMS doesn't require touching
-    this function - any piece whose drive isn't found in that derived set
-    is skipped and reported rather than raising KeyError.
-
-    Only <name>_multicolor.3mf is in scope here - .step/.stl/_body/_label
-    files stay flat in out_dir, untouched, per the confirmed scope. Copies
-    via shutil.copy2 (preserves metadata) rather than moves, so the flat
-    originals in out_dir are never disturbed - other formats for the same
-    piece live only there, and nothing else reads from the plates/
-    subfolder.
-
-    Each plate subfolder is cleared (shutil.rmtree) and recreated before
-    anything is copied into it, so this is an actual rebuild every run -
-    a piece removed or renamed in PARAMS since a prior run can't leave a
-    stale <name>_multicolor.3mf sitting in a plate folder undetected.
-    Only exports/plates/* is touched this way; the flat out_dir itself is
-    out of scope and never cleared.
-
-    cap_start.3mf/cap_end.3mf are duplicated into all 4 folders (not just
-    referenced) since every plate/row needs both caps regardless of
-    drive/unit-system category, and the point of a plate folder is to be a
-    complete, self-contained set a user can import without hunting
-    elsewhere.
-
-    Skips (does not copy, does not raise) any piece whose name is in
-    `multicolor_failures` or whose _multicolor.3mf isn't actually on disk
-    for any other reason - export_multicolor_3mf already logged that
-    failure, and the overall build already fails loudly on it via
-    run()'s `assert not export_failures`, so this step doesn't need its
-    own separate hard failure, only to not crash trying to copy a file
-    that was never written. Likewise skips (does not raise) any piece
-    whose (drive, system) has no matching plate folder, collecting those
-    names to report back to the caller instead of a raw KeyError.
-
-    Returns (plates, skipped_unknown_category) where plates is
-    {(drive, system): (dest_dir, n_pieces_copied)} for the caller's own
-    summary reporting, and skipped_unknown_category is a list of piece
-    names whose drive wasn't found among the derived plate categories."""
-    plates_dir = os.path.join(out_dir, "plates")
-    plate_keys = [(drive, system) for drive in p["drives"]
-                  for system in ("metric", "sae")]
-    plate_dirs = {}
-    for drive, system in plate_keys:
-        dest = os.path.join(plates_dir, "%s_%s" % (drive, system))
-        # Clear + recreate so this is a real rebuild, not additive copying -
-        # a piece removed/renamed in PARAMS can't leave a stale file behind.
-        shutil.rmtree(dest, ignore_errors=True)
-        os.makedirs(dest, exist_ok=True)
-        plate_dirs[(drive, system)] = dest
-
-    counts = {key: 0 for key in plate_keys}
-    skipped_unknown_category = []
-    for name, drive, _label_text, _nominal_mm in _middle_piece_specs(p):
-        if name in multicolor_failures:
-            continue
-        system = "metric" if name.startswith("metric_") else "sae"
-        dest = plate_dirs.get((drive, system))
-        if dest is None:
-            skipped_unknown_category.append(name)
-            continue
-        src = os.path.join(out_dir, name + "_multicolor.3mf")
-        if not os.path.exists(src):
-            continue
-        shutil.copy2(src, dest)
-        counts[(drive, system)] += 1
-
-    for dest in plate_dirs.values():
-        for cap_name in ("cap_start.3mf", "cap_end.3mf"):
-            src = os.path.join(out_dir, cap_name)
-            if os.path.exists(src):
-                shutil.copy2(src, dest)
-
-    plates = {key: (plate_dirs[key], counts[key]) for key in plate_keys}
-    return plates, skipped_unknown_category
-
-
 def run():
     doc = App.newDocument("socket_organizer")
-    # Build the 59 middle pieces' (body, label) parts once, then derive the
-    # fused single-solid pieces from them locally (same as generate_all(p)
-    # does internally) instead of also calling generate_all_parts(p) again
-    # later for the multi-color export - that would rebuild every middle
-    # piece's base/post/dovetail/label geometry from scratch a second time.
-    parts = generate_all_parts(PARAMS)
-    pieces = {name: body.fuse(label) for name, (body, label) in parts.items()}
-    pieces["cap_start"] = make_cap(PARAMS, "start")
-    pieces["cap_end"] = make_cap(PARAMS, "end")
-    # Expected count comes straight from _middle_piece_specs(PARAMS) - the
-    # single source of truth for the size/category table (see its
-    # docstring) - plus the 2 caps, rather than a hand-derived formula
-    # that would need to be kept in sync by hand if a category or size
-    # list ever changes. As of the 3-category size-coverage extension:
-    # 2 metric (6-7mm, 3/8in only) + 15 metric x 2 drives (8-22mm) + 3
-    # metric (23-25mm, 1/2in only) = 35 metric. 12 SAE x 2 drives (5/16-1in,
-    # no drive-only category any more) = 24 SAE. 35 + 24 + 2 caps = 61
-    # pieces total.
-    expected = len(list(_middle_piece_specs(PARAMS))) + 2
-    print("generated %d pieces (expected %d)" % (len(pieces), expected))
-    assert len(pieces) == expected == 61
-
-    print("\n--- multi-color part-reconstruction spot-check ---")
-    # Confirms body_without_label U label_only reconstructs exactly the
-    # same fused solid used for every self-check/coupon/export above -
-    # i.e. splitting the piece into two files for multi-color printing
-    # doesn't silently change the geometry that gets printed. Also reports
-    # the intentional body/label embed overlap (see emboss_label's
-    # docstring) so it's visible this is the expected small embed, not an
-    # unbounded overlap.
-    for name in ("metric_12mm_1-2in", "sae_5-16in_3-8in"):
-        body, label = parts[name]
-        reconstructed_vol = body.fuse(label).Volume
-        fused_vol = pieces[name].Volume
-        embed_overlap = body.common(label).Volume
-        print("%s: fused=%.4f mm3, body+label refused=%.4f mm3 "
-              "(diff %.6f), body/label embed overlap=%.4f mm3"
-              % (name, fused_vol, reconstructed_vol,
-                 abs(fused_vol - reconstructed_vol), embed_overlap))
-        assert abs(fused_vol - reconstructed_vol) < 1e-6, (
-            "%s: body/label split does not reconstruct the fused piece"
-            % name)
-        assert embed_overlap > 0.0, (
-            "%s: body/label have no overlap - label would not attach"
-            % name)
-
-    coupon = build_dovetail_coupon(PARAMS)
-    # NOTE: this only proves the two halves fuse into one watertight solid
-    # (i.e. the flat base walls touch with no gap). It does NOT verify the
-    # dovetail tail/groove actually interlock - two pieces would fuse into
-    # 1 solid via wall contact alone even if dt_* geometry were wrong.
-    # Don't treat this as dovetail-fit proof; that needs eyeballing the
-    # coupon geometry or a real print.
-    assert len(coupon.Solids) == 1, "dovetail coupon halves did not fuse into one piece"
-    print("dovetail coupon: 1 solid, volume %.1f mm3" % coupon.Volume)
+    pieces = generate_all(PARAMS)
+    print("generated %d pieces (expected 5)" % len(pieces))
+    assert len(pieces) == 5
+    assert set(pieces) == {"template_3-8in", "template_1-2in",
+                            "cap_start", "cap_end", "nameplate_template"}
 
     print("\n--- self-check report ---")
     struct_issues = check_structural(PARAMS)
@@ -1980,31 +1250,32 @@ def run():
     else:
         print("all FUSE_EMBED-dependent fuses have genuine volumetric "
               "overlap (post/base x%d drives, dovetail tail/base, "
-              "cap corner cuts x2)" % len(PARAMS["drives"]))
+              "cap corner cuts x2, nameplate tail/plaque, "
+              "nameplate/template)" % len(PARAMS["drives"]))
 
-    print("\n--- label legibility self-check "
-          "(bbox placement + counter widths, reusing built parts) ---")
-    label_legibility_issues = check_label_legibility(PARAMS, parts)
-    if label_legibility_issues:
-        for issue in label_legibility_issues:
-            print("LABEL-LEGIBILITY: %s" % issue)
+    print("\n--- nameplate slot/tail fit self-check "
+          "(real B-rep containment/collision/connectivity) ---")
+    nameplate_fit_issues = check_nameplate_fit(PARAMS)
+    if nameplate_fit_issues:
+        for issue in nameplate_fit_issues:
+            print("NAMEPLATE-FIT: %s" % issue)
     else:
-        print("all label texts stay within the wall's Z range [0, %.1f] and "
-              "the base's X width [0, %.1f], and every counter/aperture "
-              "stays above the %.2fmm floor"
-              % (PARAMS["base_h"], PARAMS["base_w"], COUNTER_WIDTH_FLOOR))
+        print("nameplate tail is substantially contained in the template's "
+              "slot cavity, collides with neither the post nor the "
+              "piece-to-piece dovetail, the assembled coupon is one "
+              "connected solid, and the plaque footprint stays within the "
+              "template's width")
 
     print("\n--- socket OD clearance self-check "
-          "(real cylinder probes, every size in the table) ---")
+          "(real cylinder probe, 1in SAE worst case) ---")
     od_clearance_issues = check_socket_od_clearance(PARAMS)
     if od_clearance_issues:
         for issue in od_clearance_issues:
             print("OD-CLEARANCE: %s" % issue)
     else:
-        print("every 6-25mm metric / 5/16-1in SAE socket's estimated OD "
-              "clears the base footprint (and stays clear of the dovetail "
-              "tail/groove) by more than the %.2fmm floor"
-              % OD_CLEARANCE_FLOOR)
+        print("the worst-case (1in SAE) estimated socket OD clears the "
+              "base footprint (and stays clear of the dovetail tail/"
+              "groove) by more than the %.2fmm floor" % OD_CLEARANCE_FLOOR)
 
     printability_issues = []
     mesh_issues = []
@@ -2019,160 +1290,52 @@ def run():
             mesh_issues.append(report)
 
     # Fit check: friction interference differs by drive (af_nominal 9.53mm
-    # vs 12.70mm with the same 0.5mm undersize applied to both), so probe one
-    # representative piece per drive rather than a single hand-picked size.
-    for drive, sample_name in (("1-2in", "metric_12mm_1-2in"),
-                                ("3-8in", "metric_12mm_3-8in")):
-        overlap = check_post_fit(pieces[sample_name], PARAMS, drive)
+    # vs 12.70mm with the same 0.5mm undersize applied to both).
+    for drive in PARAMS["drives"]:
+        name = "template_%s" % drive
+        overlap = check_post_fit(pieces[name], PARAMS, drive)
         print("post fit probe overlap (%s, drive %s): %.2f mm3"
-              % (sample_name, drive, overlap))
+              % (name, drive, overlap))
         assert overlap > 0.5, (
-            "%s post shows no interference with nominal drive square (%s) "
-            "- too loose" % (sample_name, drive))
+            "%s post shows no interference with nominal drive square - "
+            "too loose" % name)
 
     assert not struct_issues, "structural check failed, see report above"
     assert not fuse_issues, "fuse-overlap check failed, see report above"
-    assert not label_legibility_issues, (
-        "label legibility check failed, see report above")
+    assert not nameplate_fit_issues, (
+        "nameplate slot/tail fit check failed, see report above")
     assert not od_clearance_issues, (
         "socket OD clearance check failed, see report above")
     assert not printability_issues, "printability check failed, see report above"
     assert not mesh_issues, "mesh/watertight check failed, see report above"
 
+    coupon = build_dovetail_coupon(PARAMS)
+    # NOTE: this only proves the two halves fuse into one watertight solid
+    # (i.e. the flat base walls touch with no gap). It does NOT verify the
+    # dovetail tail/groove actually interlock; don't treat this as
+    # dovetail-fit proof, that needs eyeballing the coupon geometry or a
+    # real print.
+    assert len(coupon.Solids) == 1, "dovetail coupon halves did not fuse into one piece"
+    print("dovetail coupon: 1 solid, volume %.1f mm3" % coupon.Volume)
+
     out_dir = os.path.join(_script_dir(), "exports")
-    # The 59 middle pieces skip .3mf here (formats=("step", "stl")):
-    # <name>_multicolor.3mf below already supersedes the combined .3mf for
-    # anyone with a multi-color printer, and <name>.step/.stl cover
-    # single-color printing, so a plain combined <name>.3mf would be pure
-    # redundancy. The 2 caps have no label/multicolor variant, so they keep
-    # the full default formats (step+stl+3mf) - their .3mf is still the only
-    # 3MF option for them.
-    middle_pieces = {name: pieces[name] for name in parts}
-    cap_pieces = {"cap_start": pieces["cap_start"], "cap_end": pieces["cap_end"]}
-    export_failures = list(
-        export_all(middle_pieces, out_dir, formats=("step", "stl")))
-    export_failures.extend(export_all(cap_pieces, out_dir))
-
-    # Multi-color export, STEP+STL half: body and label as separate files
-    # per middle piece, IN ADDITION to the combined <name>.step/.stl/.3mf
-    # above (not a replacement - single-color printers still use the
-    # combined file). Both halves share the exact coordinate frame they
-    # were fused in (see make_middle_piece_parts). .3mf is deliberately
-    # excluded here (formats=("step", "stl")) - a single-object 3MF for
-    # just the body or just the label is redundant now that
-    # export_multicolor_3mf() below writes both as one combined
-    # multi-object 3MF, which is what Bambu Studio's multi-color workflow
-    # actually wants (one file, two objects at the same position) rather
-    # than two separate files to import side by side.
-    split_shapes = {}
-    for name, (body, label) in parts.items():
-        split_shapes[name + "_body"] = body
-        split_shapes[name + "_label"] = label
-    export_failures.extend(
-        export_all(split_shapes, out_dir, formats=("step", "stl")))
-
-    # Multi-color export, combined 3MF: body + label as two objects in one
-    # <name>_multicolor.3mf per middle piece - see export_multicolor_3mf's
-    # docstring for why this needs Mesh.export() rather than Part.export().
-    #
-    # Uses multicolor_parts (label built per label text by
-    # per_label_multicolor_embed via generate_all_parts_multicolor), NOT
-    # `parts` (label built with the full label_embed) - `parts`' label
-    # geometry is only correct for the FUSED path (make_middle_piece's
-    # body.fuse(label), i.e. `pieces` and the plain combined/split-STEP/STL
-    # exports above). Reusing `parts` here would put ~0.2mm of literally
-    # overlapping body/label volume, assigned to two different filaments,
-    # along the whole label outline - see generate_all_parts_multicolor's
-    # docstring for the confirmed real-print seam artifact this caused.
-    multicolor_parts = generate_all_parts_multicolor(PARAMS, parts)
-
-    print("\n--- multi-color overlap self-check "
-          "(every distinct label text, per-label adaptive embed) ---")
-    # See check_multicolor_overlap's docstring for why this sweeps every
-    # distinct label text rather than 2 hardcoded pieces (the earlier,
-    # narrower version of this check, which happened to miss the actual
-    # worst-case labels "1"/"7" entirely - the real defect a user's Bambu
-    # Studio import reported).
-    multicolor_overlap_issues = check_multicolor_overlap(PARAMS, multicolor_parts)
-    if multicolor_overlap_issues:
-        for issue in multicolor_overlap_issues:
-            print("MULTICOLOR-OVERLAP: %s" % issue)
-    else:
-        print("every distinct label text's multicolor body/label overlap "
-              "clears the %.2fmm3 floor (target %.2fmm3)"
-              % (MC_OVERLAP_FLOOR, MC_TARGET_OVERLAP_MM3))
-    assert not multicolor_overlap_issues, (
-        "multicolor overlap check failed, see report above")
-
-    multicolor_failures = export_multicolor_3mf(multicolor_parts, out_dir)
-    export_failures.extend(multicolor_failures)
-
-    print("\n--- multi-color 3MF structure spot-check "
-          "(2 objects / 2 items expected) ---")
-    # Reuses the same two representative piece names as the
-    # part-reconstruction spot-check above, rather than the full 59, for the
-    # same reason check_post_fit only probes a couple of representative
-    # pieces instead of all 61: the geometry that determines object/item
-    # count here (Mesh.export() being handed a 2-element list) does not vary
-    # by piece, only the file being real and on disk does. Skips a name if
-    # its multicolor export already failed above - there is no file to open.
-    multicolor_structure_issues = []
-    for name in ("metric_12mm_1-2in", "sae_5-16in_3-8in"):
-        if name in multicolor_failures:
-            continue
-        mc_path = os.path.join(out_dir, name + "_multicolor.3mf")
-        n_objects, n_items = check_multicolor_3mf_structure(mc_path)
-        print("%s_multicolor.3mf: %d object(s), %d item(s)"
-              % (name, n_objects, n_items))
-        if n_objects != 2 or n_items != 2:
-            multicolor_structure_issues.append(
-                "%s_multicolor.3mf: expected 2 objects/2 items, got "
-                "%d objects/%d items" % (name, n_objects, n_items))
-    # Folded into export_failures (asserted at the end, below, alongside
-    # every other export outcome) rather than asserted here immediately -
-    # same "let every shape be attempted first" reasoning as the rest of
-    # this function's export handling.
-    export_failures.extend(multicolor_structure_issues)
-
-    print("\n--- plate-folder organization "
-          "(grouping _multicolor.3mf by drive+unit-system) ---")
-    # Runs after export_multicolor_3mf/multicolor_failures above so every
-    # _multicolor.3mf that's going to exist already does - see
-    # organize_plate_folders' docstring for why it only copies (shutil.copy2,
-    # preserving the flat originals in out_dir untouched) rather than moves,
-    # and why it silently skips names in multicolor_failures instead of
-    # raising its own error (the overall build already fails loudly on those
-    # via export_failures below).
-    plate_report, plate_unknown_category = organize_plate_folders(
-        PARAMS, out_dir, multicolor_failures)
-    for (drive, system), (dest, n_copied) in sorted(plate_report.items()):
-        print("  %s: %d piece(s) + 2 caps -> %s" % (
-            "%s %s" % (drive, system), n_copied, dest))
-    # A piece whose drive has no matching plate folder is a real bug (PARAMS
-    # and _middle_piece_specs disagreeing) rather than something to skip
-    # forever - fold it into export_failures so the build still fails loudly
-    # on it, same as every other export outcome below.
-    export_failures.extend(
-        "%s: no plate folder for its drive (check PARAMS['drives'])" % name
-        for name in plate_unknown_category)
+    export_failures = list(export_all(pieces, out_dir))
 
     coupons = {
         "post_coupon_3-8in": build_post_coupon(PARAMS, "3-8in"),
         "post_coupon_1-2in": build_post_coupon(PARAMS, "1-2in"),
-        "dovetail_coupon": build_dovetail_coupon(PARAMS),
+        "dovetail_coupon": coupon,
+        "nameplate_coupon": build_nameplate_coupon(PARAMS),
     }
     export_failures.extend(export_all(coupons, out_dir))
 
-    print("\nExported %d pieces + %d body/label part-pairs + %d multicolor "
-          "3MFs + %d coupons to %s"
-          % (len(pieces), len(split_shapes) // 2,
-             len(multicolor_parts) - len(multicolor_failures),
-             len(coupons), out_dir))
+    print("\nExported %d pieces + %d coupons to %s"
+          % (len(pieces), len(coupons), out_dir))
 
     # A partial export set must never silently look like success - but let
-    # every shape in both batches be attempted first (export_all already
-    # ran the full loop and collected every failure, not just the first)
-    # before failing loudly here.
+    # every shape be attempted first (export_all already ran the full loop
+    # and collected every failure, not just the first) before failing
+    # loudly here.
     assert not export_failures, (
         "export failed for %d shape(s): %s"
         % (len(export_failures), ", ".join(export_failures)))
