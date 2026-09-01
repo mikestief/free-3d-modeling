@@ -509,16 +509,117 @@ def make_nameplate_slot_cutter(p):
     past base_h (see make_dovetail_groove_cutter). The bottom end
     (local Y=0) is NOT overshot - that is the deliberate closed-bottom
     stop the tail rests against, and must stay exactly at nameplate_zone_z
-    for the mechanism to work."""
+    for the mechanism to work.
+
+    to_clear_wall's derivation (must genuinely clear base_h for ANY
+    front_slope_deg, not just today's 20 - a first version of this formula
+    only accounted for the up-slope/local-Y recession and silently
+    reintroduced the exact ceiling defect above as slope grew past ~68deg;
+    see the derivation below for why, and the live slope-sweep results
+    further down for what was actually confirmed clean vs. not):
+
+    _place_on_wall's own docstring proves world Z = z_anchor + y*cos(slope)
+    for a LOCAL-Z=0 point at local-Y=y. That's the proof this function used
+    to lean on - but the cutter's far end-cap is NOT confined to local Z=0:
+    it spans the full profile cross-section, local Z in [-depth, 0] (depth
+    = nameplate_dt_depth, the cavity's cut depth into the wall - see
+    _nameplate_dt_profile's outward=False/sign=-1 convention). Extending
+    _place_on_wall's rotation to a general local point (x, y, z) (rotating
+    by theta=90-slope about the X axis, same rotation matrix, just with the
+    z-term restored instead of dropped at z=0) gives:
+
+        world Z = z_anchor + y*cos(slope) + z*sin(slope)
+
+    For the end-cap at local Y=total_h, the WORST (smallest) world Z over
+    the cap's own local-Z range [-depth, 0] is at z=-depth (the cavity's
+    deepest point, since sin(slope) > 0 for any slope in (0, 90)):
+
+        worst_world_Z = nameplate_zone_z + total_h*cos(slope)
+                        - depth*sin(slope)
+
+    That -depth*sin(slope) term is exactly the "additional recession...
+    via the local-Z-to-world-Z term" the old formula dropped by only ever
+    evaluating the proof at z=0: the cavity's own depth pulls its deepest
+    corner further BACK in world Y *and* further DOWN in world Z as slope
+    grows, on top of the up-slope-only recession already accounted for.
+    Solving worst_world_Z >= base_h + margin for total_h (margin is a
+    genuine WORLD-Z buffer past base_h, not a local-Y one):
+
+        total_h >= (base_h - nameplate_zone_z + margin) / cos(slope)
+                   + depth * tan(slope)
+
+    which is what to_clear_wall computes below (margin=5.0mm, matching the
+    prior formula's own buffer at slope=0 exactly - plug slope=0 into both
+    sides above and the depth*tan(0)=0 term vanishes, reducing to the
+    original (base_h - nameplate_zone_z) + 5.0 - so this is a strict
+    generalization, not a different formula that happens to agree at one
+    point). Verified live: at today's front_slope_deg=20/nameplate_dt_
+    depth=2.0/base_h=10.0, this adds ~1mm to to_clear_wall over the old
+    formula (real margin at 20deg was already ~4mm, not a live bug) and
+    total_h is unchanged in every OTHER respect - same cavity cross-
+    section, same closed-bottom anchor - so check_nameplate_fit's
+    containment/collision/connectivity/footprint numbers are unaffected.
+
+    What was actually live-verified, isolating the delta overhang caused
+    specifically by this cutter (baseline template body vs. the same body
+    with this cutter applied, same technique used to originally find the
+    bug): the corrected formula introduces ZERO new flat overhangs across
+    front_slope_deg in {5, 20, 45, 60} deg at base_h=10 (also re-checked at
+    base_h=5 and base_h=20, front_slope_deg=20) - this is the range this
+    fix is actually asserting "genuinely slope-general" for.
+
+    IMPORTANT caveat found while verifying past that range, at base_h=10:
+    starting around front_slope_deg~=62deg, a DIFFERENT, pre-existing new
+    overhang appears, and it is NOT the ceiling defect this function
+    exists to prevent - direct B-rep boolean checks
+    (cavity.common(make_post(p, drive)).Volume) confirm the cavity itself
+    now has real positive volumetric overlap with the drive post, which
+    shares this cavity's own X-center (both sit at base_w/2 - see make_
+    post's cx). At steep slope the local-Y overshoot this function
+    performs necessarily travels a long way in world Y as well as world Z
+    (see _place_on_wall's rotation - the same y*sin(slope) term that
+    grows total_h's world-Z contribution also grows its world-Y one), and
+    past ~62deg (this base_h/post placement) that world-Y travel reaches
+    into the post's own footprint, carving a real notch out of it.
+
+    This is NOT fixable by changing to_clear_wall's magnitude: confirmed
+    live that even the bare mathematical MINIMUM total_h (margin=0, i.e.
+    worst_world_Z landing exactly on base_h with no buffer at all) already
+    overlaps the post at front_slope_deg=70/base_h=10 (21.3mm3) and
+    front_slope_deg=80/base_h=5 (25.9mm3) - the two edge cases originally
+    suspected of reproducing the ceiling bug. So while this fix does
+    correctly eliminate the ceiling defect at those two slopes (the
+    world-Z-buffer math is sound at any slope - see the derivation above),
+    it does NOT achieve a fully clean build there, because a SEPARATE,
+    orthogonal constraint (wall slope vs. post placement, not wall slope
+    vs. base_h) takes over as the binding one. Fixing that would mean
+    changing the cutter's SHAPE (e.g. a world-Z-aligned "chimney" for the
+    overshoot instead of continuing straight along local Y) rather than
+    this scalar overshoot amount, which is out of scope here - flagged as
+    a separate follow-up. Note the base design itself (no nameplate
+    feature at all) already produces its own unrelated flat overhangs by
+    front_slope_deg=75-85deg (from the wedge-cut/post interaction), so
+    those extreme slopes are already outside this design's viable
+    envelope independent of this cutter.
+
+    Bottom line: this fix's valid, live-verified range is roughly
+    front_slope_deg up to ~60deg (well past today's 20deg) rather than
+    "any slope whatsoever" - genuinely slope-general within that range,
+    with the >~62deg regime gated by the separate post-placement
+    constraint described above, not by this function's own math."""
     face = _nameplate_dt_profile(p, outward=False,
                                   clearance=p["nameplate_dt_clearance"])
     open_h = p["nameplate_h"] + p["nameplate_slot_open_h"]
-    # Local-Y distance from nameplate_zone_z needed for the cutter's world
-    # Z to clear base_h (where the wall's own material ends), plus a 5mm
-    # buffer - see docstring above for why this must clear base_h rather
-    # than just open_h.
+    # Local-Y distance from nameplate_zone_z needed for the cutter's WORST
+    # end-cap corner (local Z=-nameplate_dt_depth, the cavity's deepest
+    # point, not just local Z=0) to clear base_h in world Z by a genuine
+    # 5mm buffer, for any front_slope_deg - see docstring above for the
+    # full derivation of why the depth*tan(slope) term is required.
     slope_rad = math.radians(p["front_slope_deg"])
-    to_clear_wall = (p["base_h"] - p["nameplate_zone_z"]) / math.cos(slope_rad) + 5.0
+    depth = p["nameplate_dt_depth"]
+    margin = 5.0
+    to_clear_wall = ((p["base_h"] - p["nameplate_zone_z"] + margin)
+                      / math.cos(slope_rad) + depth * math.tan(slope_rad))
     total_h = max(open_h, to_clear_wall)
     solid = face.extrude(App.Vector(0, total_h, 0))
     return _place_on_wall(p, solid, p["nameplate_zone_z"],
