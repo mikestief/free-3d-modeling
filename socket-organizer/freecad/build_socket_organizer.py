@@ -1109,10 +1109,12 @@ def check_nameplate_fit(p):
       1. CONTAINMENT - the tail (built with no clearance) should sit
          almost entirely inside the groove cavity (built with
          nameplate_dt_clearance added to neck/tip) once both are placed at
-         their real assembled positions. Not exactly 100% - a real
-         clearance-fit dovetail is *designed* to be slightly smaller than
-         its cavity so it can physically slide - but a low fraction would
-         mean the two are actually misaligned, not just clearance-loose.
+         their real assembled positions. Not exactly 100% - verified live
+         that the ~4% gap is the tail's own FUSE_EMBED root overlap (the
+         same intentional push-past-the-wall-plane every other fuse in
+         this file uses, matching make_dovetail_tail/make_post), not
+         clearance and not misalignment - but a low fraction would still
+         mean the two are actually misaligned, worth catching.
       2. COLLISION - the tail must not collide with the post or either
          half of the piece-to-piece dovetail (both 0.0 mm3 overlap
          expected - they sit far apart in Y, but this checks the real
