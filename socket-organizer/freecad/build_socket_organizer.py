@@ -140,25 +140,71 @@ PARAMS = {
                                # OCC's fuse() needs real volumetric overlap
                                # at the seam or it produces invalid,
                                # non-manifold geometry at exact tangency.
-    "label_embed_multicolor": 0.03,  # back-face push used for the UNFUSED
-                               # multi-color 3MF export (export_multicolor_3mf)
-                               # instead of label_embed. Body and label stay
-                               # two separate solids/meshes there - nothing
-                               # is booleaned, so none of label_embed's 0.2mm
-                               # OCC-fuse-validity margin is needed. But
-                               # label_embed's full 0.2mm WAS still being
-                               # used on this path too, which put ~0.2mm of
-                               # literally-overlapping volume, assigned to
-                               # two different filaments, along the entire
-                               # label outline - confirmed (real test print,
-                               # Bambu Studio slice preview) to show up as a
-                               # visible white seam traced exactly around
-                               # the label text. This value only needs to be
-                               # large enough that the label doesn't render
-                               # as floating/gapped off the wall in a
-                               # slicer/mesh viewer - see run()'s multicolor
-                               # overlap spot-check for measured overlap
-                               # volumes at this depth.
+    "label_embed_multicolor": 0.03,  # BASE/FLOOR back-face push for the
+                               # UNFUSED multi-color 3MF export
+                               # (export_multicolor_3mf). NOT a single flat
+                               # depth used for every label any more - see
+                               # per_label_multicolor_embed() and
+                               # generate_all_parts_multicolor(). Body and
+                               # label stay two separate solids/meshes on
+                               # this path - nothing is booleaned, so none
+                               # of label_embed's 0.2mm OCC-fuse-validity
+                               # margin is needed.
+                               #
+                               # History: label_embed's full 0.2mm WAS
+                               # originally used on this path too, which put
+                               # ~0.2mm of literally-overlapping body/label
+                               # volume, assigned to two different
+                               # filaments, along the entire label outline -
+                               # confirmed (real test print, Bambu Studio
+                               # slice preview) to show up as a visible
+                               # white seam traced exactly around the label
+                               # text. Dropping to a flat 0.03mm for every
+                               # label fixed that seam, but a later real
+                               # Bambu Studio import of metric_7mm_3-8in and
+                               # sae_1in_3-8in (labels "7" and "1") showed
+                               # the OPPOSITE defect: the label floating,
+                               # visibly disconnected from the body.
+                               #
+                               # Root cause, confirmed by sweeping
+                               # body.common(label).Volume for every
+                               # distinct label text in the size table at
+                               # this flat 0.03mm: "1"/"7" (the simplest,
+                               # narrowest-stroke digits) have far less
+                               # material at the wall than every other
+                               # label, so even though the B-rep genuinely
+                               # touches (distToShape == 0.0), their overlap
+                               # volume (~0.22-0.25mm3) is small enough for
+                               # independent per-object mesh tessellation
+                               # noise (this file's own
+                               # LINEAR_DEFLECTION=0.02mm, documented above
+                               # as producing ~0.004-0.018mm noise) to
+                               # plausibly erase the connection in the
+                               # exported mesh - while wide labels ("9/16"
+                               # etc.) already sit at 1.2-1.4mm3 at this same
+                               # 0.03mm depth, nowhere near that risk. A
+                               # uniform embed increase can't fix this
+                               # without reintroducing the seam: raising it
+                               # enough for "1"/"7" pushes wide labels back
+                               # toward the ~1.69mm3+ overlap that caused the
+                               # original seam - there is very little
+                               # headroom ("5/16" is already at 1.19mm3 at
+                               # this floor).
+                               #
+                               # So this value is now only the STARTING
+                               # POINT: the real per-label push depth is
+                               # computed per distinct label text by
+                               # per_label_multicolor_embed(), which leaves
+                               # a label at exactly this depth if its
+                               # overlap already clears MC_TARGET_OVERLAP_MM3
+                               # here (no added seam risk for labels that
+                               # don't need more), and increases it - capped
+                               # at MC_EMBED_CAP_MM - only for labels that
+                               # need more. See MC_TARGET_OVERLAP_MM3,
+                               # MC_EMBED_CAP_MM, and run()'s widened
+                               # multicolor-overlap self-check
+                               # (check_multicolor_overlap) for the measured
+                               # numbers.
                                #
                                # Why not zero overlap (an exact shared
                                # boundary) instead of a small deliberate
@@ -171,13 +217,9 @@ PARAMS = {
                                # tessellated body/label meshes, not a single
                                # B-rep boolean) avoids that failure mode too,
                                # which hasn't been established. A small,
-                               # measured, deliberate overlap is the
-                               # pragmatic choice given that history, even
-                               # though it's not a complete guarantee the
-                               # seam is imperceptible rather than merely
-                               # fainter - only confirmed by B-rep volume
-                               # reduction (~6.7x vs. label_embed's 0.2mm),
-                               # not yet by a repeat physical print.
+                               # measured, deliberate overlap (now tuned per
+                               # label text rather than flat) is the
+                               # pragmatic choice given that history.
 
     # --- cap (start/end piece) ----------------------------------------------
     "cap_round_r":     8.0,   # radius of the closed rounded end
@@ -328,6 +370,68 @@ SOCKET_OD_POINTS_MM = [(22.0, 30.0), (25.0, 35.0)]
 # revisit whether 1.5mm is still the right floor for the (hopefully
 # tighter) resulting estimate.
 OD_CLEARANCE_FLOOR = 1.5
+
+# Target minimum body/label overlap volume (mm3), PER DISTINCT LABEL TEXT, for
+# the UNFUSED multi-color 3MF export - see per_label_multicolor_embed() and
+# PARAMS["label_embed_multicolor"]'s comment for the full story. Chosen with
+# real margin on both sides of the two measured failure ranges:
+#
+#   - floating-prone: at the old flat 0.03mm embed, "1" and "7" (the
+#     simplest, narrowest-stroke digits) measure only ~0.22-0.25mm3 overlap -
+#     small enough for independent per-object mesh tessellation noise
+#     (~0.004-0.018mm, see SELF_INTERSECT_TOL) to plausibly erase the
+#     connection in the exported mesh even though the B-rep genuinely
+#     touches. This is the confirmed root cause of a real user's Bambu
+#     Studio import (metric_7mm_3-8in, sae_1in_3-8in) showing the label
+#     floating off the body.
+#   - seam-prone: label_embed=0.2mm (the fused single-color path's depth,
+#     never used on this unfused path) produces overlap around 1.69mm3+ for
+#     these same labels - confirmed via an earlier real test print to leave
+#     a visible white seam traced around the label outline in Bambu
+#     Studio's slice preview.
+#
+# 0.8mm3 sits in between with real margin either way: ~3.2-3.6x the worst
+# floating-prone overlap measured, ~0.47x the seam-prone overlap that
+# actually caused a printed defect. Verified live (see run()'s widened
+# multicolor-overlap self-check) that every distinct label text in the
+# actual size table reaches this target at or below MC_EMBED_CAP_MM, so the
+# cap is never actually exercised by real label text - it exists only to
+# bound a hypothetical pathological one.
+MC_TARGET_OVERLAP_MM3 = 0.8
+
+# Regression floor for run()'s widened multicolor-overlap self-check -
+# deliberately a bit below MC_TARGET_OVERLAP_MM3 (not equal to it) so the
+# check doesn't flap on the tiny (~1e-7mm3, pure float noise - verified live)
+# residual the linear fit in per_label_multicolor_embed() leaves below the
+# exact target, while still sitting with real margin above the ~0.22-0.25mm3
+# floating-prone range this whole mechanism exists to fix.
+MC_OVERLAP_FLOOR = 0.75
+
+# Second sample embed depth used by per_label_multicolor_embed() to fit a
+# local line (overlap vs. embed, for one FIXED glyph) and solve for the depth
+# that reaches MC_TARGET_OVERLAP_MM3. Verified live: for every distinct label
+# text in the size table, overlap vs. embed is linear to within float noise
+# over this whole 0.03-0.15mm range (a single 2-point fit lands within
+# ~1e-7mm3 of the exact target, no iteration needed in practice) - because
+# for a fixed glyph, overlap is essentially (contact cross-section area) x
+# (push depth), a real geometric relationship, not an extrapolation across
+# different physical objects the way estimated_socket_od_mm()'s two-point
+# model is (that one is explicitly flagged as unreliable outside its anchor
+# range; this one is a local fit for a single fixed shape, and reliable
+# across the whole range actually used).
+MC_EMBED_FIT_SAMPLE = 0.10
+
+# Hard cap (mm) on the per-label multi-color push-in depth, so a
+# pathological label text (not expected anywhere in the real size table -
+# see run()'s report of the actual max embed needed, measured live at
+# ~0.107mm for "1", the worst case) can't run away to an unreasonably deep
+# push that risks its own seam-type problems. Comfortably below
+# label_embed=0.2mm (the fused single-color path's depth, sized for a
+# different requirement - OCC fuse-validity, not visual overlap - see
+# label_embed's PARAMS comment) and below label_depth=0.6mm, which
+# emboss_label's own `embed = min(embed, p["label_depth"])` already caps
+# every embed value against regardless.
+MC_EMBED_CAP_MM = 0.15
 
 
 def estimated_socket_od_mm(nominal_mm):
@@ -665,15 +769,19 @@ def emboss_label(p, text, embed=None):
     positioned centered in X, standing proud by label_depth.
 
     `embed` overrides `p["label_embed"]` for the back-face push described
-    below (still capped by label_depth). Pass `p["label_embed_multicolor"]`
-    here when building the label for the UNFUSED multi-color 3MF export
-    (see export_multicolor_3mf / generate_all_parts_multicolor) - that path
-    never booleans body and label together, so it doesn't need label_embed's
-    larger OCC-fuse-validity margin, and using the full 0.2mm there puts
-    visibly-overlapping same-position volume under two different filament
-    assignments (confirmed via test print: a white seam traced around the
-    label outline in Bambu Studio's slice preview). Leave `embed` as None
-    (the default) for the fused single-color path (make_middle_piece), which
+    below (still capped by label_depth). Pass the per-label-text depth
+    computed by per_label_multicolor_embed() (starting from
+    `p["label_embed_multicolor"]` as its floor) here when building the label
+    for the UNFUSED multi-color 3MF export (see export_multicolor_3mf /
+    generate_all_parts_multicolor) - that path never booleans body and label
+    together, so it doesn't need label_embed's larger OCC-fuse-validity
+    margin, and using the full 0.2mm there puts visibly-overlapping
+    same-position volume under two different filament assignments (confirmed
+    via test print: a white seam traced around the label outline in Bambu
+    Studio's slice preview). A flat `p["label_embed_multicolor"]` for every
+    label undershoots this same way for narrow-stroke digits like "1"/"7" -
+    see per_label_multicolor_embed()'s docstring. Leave `embed` as None (the
+    default) for the fused single-color path (make_middle_piece), which
     still needs the full label_embed margin - see below.
 
     make_base's front wall leans back in +Y as it rises: at height Z the
@@ -741,10 +849,13 @@ def make_middle_piece_parts(p, drive, label_text, label_embed=None):
     `label_embed` is forwarded to emboss_label as its `embed` override
     (None, the default, means "use p['label_embed']" - see emboss_label).
     Every caller that needs the fused single-color piece's label geometry
-    (make_middle_piece, generate_all_parts) must leave this as None.
-    generate_all_parts_multicolor is the one caller that passes
-    p['label_embed_multicolor'] instead, for the unfused multi-color 3MF
-    export, which doesn't need label_embed's OCC-fuse-validity margin."""
+    (make_middle_piece, generate_all_parts) must leave this as None. The
+    multi-color path does NOT go through this parameter at all -
+    generate_all_parts_multicolor reuses this function's `body` output
+    unchanged (body doesn't depend on the label's embed) but rebuilds the
+    label separately via per_label_multicolor_embed(), which needs a
+    different embed PER DISTINCT LABEL TEXT (not one shared override value)
+    - see that function's docstring for why."""
     body = make_base(p).fuse(make_post(p, drive))
     body = body.fuse(make_dovetail_tail(p))
     body = body.cut(make_dovetail_groove_cutter(p))
@@ -900,6 +1011,96 @@ def generate_all_parts(p):
             for name, drive, label_text, _nominal_mm in _middle_piece_specs(p)}
 
 
+def per_label_multicolor_embed(p, body, label_text, target=MC_TARGET_OVERLAP_MM3):
+    """Push-in depth (mm), body/label overlap (mm3), and the built label
+    solid for `label_text`'s multi-color label, computed PER LABEL TEXT so
+    every label reaches `target` overlap with `body` - instead of using one
+    flat p["label_embed_multicolor"] depth for every label regardless of how
+    much material that glyph actually puts at the wall.
+
+    Why per-label: the same push-in depth produces wildly different contact
+    volume depending on the glyph. "1" and "7" (the simplest, narrowest
+    strokes) leave far less contact footprint than a wide label like "9/16"
+    at the identical depth. A real Bambu Studio import of metric_7mm_3-8in
+    and sae_1in_3-8in (labels "7" and "1") showed exactly this: the label
+    floating, disconnected from the body. Confirmed root cause: at the old
+    flat p["label_embed_multicolor"]=0.03mm depth, "1"/"7" measure only
+    ~0.22-0.25mm3 overlap - small enough for independent per-object mesh
+    tessellation noise to erase the connection in the exported mesh even
+    though the B-rep genuinely touches (distToShape == 0). Raising the embed
+    uniformly to fix that would push wide labels back toward the ~1.69mm3+
+    overlap that caused a real, separately-confirmed visible print seam
+    earlier in this project's history (see
+    PARAMS["label_embed_multicolor"]'s comment) - there is very little
+    headroom (at 0.03mm, "5/16" is already at ~1.19mm3). So each label text
+    gets its own depth: a label that already clears `target` at the base
+    p["label_embed_multicolor"] depth is left there untouched (no added seam
+    risk for labels that don't need it); a label below target gets pushed
+    deeper, only as deep as its own geometry needs, capped at
+    MC_EMBED_CAP_MM.
+
+    Method: overlap volume vs. push-in depth for a FIXED glyph is a smooth,
+    real geometric relationship (more push-in monotonically buries more of
+    the glyph's own cross-section into the wall - verified live to be
+    linear to within float noise across the whole 0.03-0.15mm range used
+    here), NOT an extrapolation across different physical objects the way
+    estimated_socket_od_mm()'s two-point model is (that one is explicitly
+    flagged as unreliable outside its anchor range; this is a local fit for
+    one fixed shape, reliable across the range actually used - see
+    MC_EMBED_FIT_SAMPLE's comment). So a cheap 2-point local linear fit
+    suffices instead of iterative binary search: measure real overlap at the
+    base embed and at MC_EMBED_FIT_SAMPLE, fit a line through those two real,
+    B-rep-measured points, solve for the depth that lands on `target`, then
+    verify with one direct measurement at the solved depth - refitting once
+    more from the two most recent points if that verification isn't yet at
+    target (in practice, verified live, the first fit already lands within
+    ~1e-7mm3 of `target` for every label text in the size table, so this
+    refinement never actually triggers on real data - it exists as a safety
+    net, not because it's needed here)."""
+    base = p["label_embed_multicolor"]
+
+    def sample(embed):
+        label = emboss_label(p, label_text, embed=embed)
+        return embed, label, body.common(label).Volume
+
+    def solve(ea, va, eb, vb):
+        # Linear fit through the two most recent real samples, solved for
+        # the embed that lands on `target`, clamped to [base, cap]. Sorts
+        # the two points by embed first - the refit call below passes the
+        # newer (often smaller-embed) point second, and without sorting,
+        # a not-yet-monotonic-looking pair in CALL order would wrongly
+        # trip the degenerate-slope fallback even though the two points
+        # are perfectly good (and monotonic) once ordered by embed. Falls
+        # back to the cap rather than dividing by a ~zero/negative slope
+        # only for a genuinely degenerate/non-monotonic pair (not expected
+        # for this smooth a relationship, but this must never raise or
+        # return something outside the valid range).
+        if eb < ea:
+            ea, va, eb, vb = eb, vb, ea, va
+        if eb <= ea or vb <= va:
+            return MC_EMBED_CAP_MM
+        slope = (vb - va) / (eb - ea)
+        return max(base, min(MC_EMBED_CAP_MM, ea + (target - va) / slope))
+
+    e0, label0, v0 = sample(base)
+    if v0 >= target:
+        return e0, v0, label0
+
+    e1, label1, v1 = sample(MC_EMBED_FIT_SAMPLE)
+
+    embed = solve(e0, v0, e1, v1)
+    embed, label, overlap = sample(embed)
+
+    if overlap < target and embed < MC_EMBED_CAP_MM - 1e-9:
+        # First fit came up short (or the cap clamped it before it could
+        # reach target) - refit once more from the two most recent real
+        # points and verify again.
+        embed = solve(e1, v1, embed, overlap)
+        embed, label, overlap = sample(embed)
+
+    return embed, overlap, label
+
+
 def generate_all_parts_multicolor(p, parts):
     """Returns {name: (body_without_label, label_only)} for the 59 middle
     pieces, for the UNFUSED multi-color 3MF export specifically
@@ -910,24 +1111,32 @@ def generate_all_parts_multicolor(p, parts):
     Reuses each piece's `body` straight from `parts` (as returned by
     generate_all_parts) rather than rebuilding the base/post/dovetail
     geometry a second time - body doesn't depend on the label's embed
-    depth at all, only the label does. Only the label is rebuilt, via the
-    same emboss_label() used everywhere else, just with
-    p['label_embed_multicolor'] instead of p['label_embed'] - so the
-    label's shape/position math has exactly one implementation
-    (emboss_label) and the two export paths differ only in the one number
-    that needs to differ.
+    depth at all, only the label does. Only the label is rebuilt, via
+    per_label_multicolor_embed() (itself built on the same emboss_label()
+    used everywhere else) rather than a single flat
+    p['label_embed_multicolor'] depth for every label - see
+    per_label_multicolor_embed's docstring for why a flat depth
+    reintroduces the exact floating-label defect for narrow-stroke digits
+    like "1"/"7".
 
-    See emboss_label's `embed` parameter and PARAMS['label_embed_multicolor']
-    for why: label_embed's 0.2mm is sized for OCC fuse-validity
-    (make_middle_piece's body.fuse(label)), and reusing that same 0.2mm on
-    this unfused path put ~0.2mm of literally-overlapping body/label volume,
-    assigned to two different filaments, along the entire label outline -
-    confirmed via test print to produce a visible seam around the label in
-    Bambu Studio's slice preview."""
+    The per-label embed/overlap/label solve is cached by `label_text`
+    (`embed_by_text`) and computed once per DISTINCT text rather than once
+    per piece - many piece names share a label text (e.g. "12" is both
+    metric_12mm_1-2in and metric_12mm_3-8in, same as
+    check_label_legibility's dedup), and the overlap doesn't depend on
+    drive (only p["label_embed_multicolor"]/body's wall geometry, which is
+    the same sloped-front-wall geometry regardless of drive - verified
+    live: identical overlap for the same label text built against a
+    3-8in-drive body and a 1-2in-drive body), so solving it twice per
+    distinct text would be pure duplicated boolean work."""
+    embed_by_text = {}
     out = {}
     for name, drive, label_text, _nominal_mm in _middle_piece_specs(p):
         body, _unused_full_embed_label = parts[name]
-        label = emboss_label(p, label_text, embed=p["label_embed_multicolor"])
+        if label_text not in embed_by_text:
+            embed_by_text[label_text] = per_label_multicolor_embed(
+                p, body, label_text)
+        _embed, _overlap, label = embed_by_text[label_text]
         out[name] = (body, label)
     return out
 
@@ -1405,6 +1614,52 @@ def check_socket_od_clearance(p):
     return issues
 
 
+def check_multicolor_overlap(p, multicolor_parts):
+    """Sweeps EVERY distinct label text's multi-color body/label overlap
+    (via body.common(label).Volume, the same real B-rep boolean
+    per_label_multicolor_embed() itself uses) and confirms each clears
+    MC_OVERLAP_FLOOR - the automated regression guard for the per-label
+    adaptive embed in per_label_multicolor_embed()/
+    generate_all_parts_multicolor().
+
+    Widened from an earlier check that only spot-checked 2 hardcoded piece
+    names (metric_12mm_1-2in, sae_5-16in_3-8in) against a single flat
+    p["label_embed_multicolor"] depth. That narrow sample is exactly what
+    let the real defect through in the first place: neither of those 2
+    pieces' labels ("12", "5/16") is anywhere near the true worst case -
+    "1" and "7" are, and a 2-piece spot-check that happens to miss the
+    worst case can't catch a regression in it. This is the same
+    "check-2-pieces missed the actual worst case" gap
+    check_label_legibility's own history already hit once (see its
+    docstring) - the fix here follows that exact established pattern:
+    dedup by label text via _middle_piece_specs(p) (many piece names share
+    a text, e.g. "12" is both metric_12mm_1-2in and metric_12mm_3-8in) and
+    sweep every distinct one, not a hand-picked subset.
+
+    Reuses each label text's already-computed (body, label) pair straight
+    from `multicolor_parts` (as returned by generate_all_parts_multicolor,
+    which already ran per_label_multicolor_embed for every distinct text)
+    rather than recomputing the per-label embed a second time here - this
+    check's only job is confirming what was actually built/exported clears
+    the floor, not re-deriving it."""
+    seen = set()
+    issues = []
+    for name, _drive, label_text, _nominal_mm in _middle_piece_specs(p):
+        if label_text in seen:
+            continue
+        seen.add(label_text)
+        body, label = multicolor_parts[name]
+        overlap = body.common(label).Volume
+        print("  %r: overlap=%.4f mm3 (target %.2f, floor %.2f)"
+              % (label_text, overlap, MC_TARGET_OVERLAP_MM3, MC_OVERLAP_FLOOR))
+        if overlap <= MC_OVERLAP_FLOOR:
+            issues.append(
+                "label %r: multicolor body/label overlap %.4f mm3 is at or "
+                "below the %.2f mm3 floor - label would not attach or "
+                "margin is negligible" % (label_text, overlap, MC_OVERLAP_FLOOR))
+    return issues
+
+
 # --------------------------------------------------------------------------
 # Export
 # --------------------------------------------------------------------------
@@ -1820,7 +2075,8 @@ def run():
     # <name>_multicolor.3mf per middle piece - see export_multicolor_3mf's
     # docstring for why this needs Mesh.export() rather than Part.export().
     #
-    # Uses multicolor_parts (label built with label_embed_multicolor), NOT
+    # Uses multicolor_parts (label built per label text by
+    # per_label_multicolor_embed via generate_all_parts_multicolor), NOT
     # `parts` (label built with the full label_embed) - `parts`' label
     # geometry is only correct for the FUSED path (make_middle_piece's
     # body.fuse(label), i.e. `pieces` and the plain combined/split-STEP/STL
@@ -1830,30 +2086,23 @@ def run():
     # docstring for the confirmed real-print seam artifact this caused.
     multicolor_parts = generate_all_parts_multicolor(PARAMS, parts)
 
-    print("\n--- multi-color 3MF overlap spot-check (reduced embed) ---")
-    # Same two representative pieces as the part-reconstruction spot-check
-    # above, confirming the smaller label_embed_multicolor still leaves the
-    # label genuinely touching the body (not floating with a gap - a
-    # positive common() volume means real overlap) while being far smaller
-    # than the full-label_embed overlap reported above, which is what
-    # eliminates the seam without introducing a visible gap instead.
-    # Floor is well above 0.0 (not just "not exactly zero") so a future edit
-    # that drops label_embed_multicolor to something numerically positive
-    # but physically negligible (e.g. 1e-4mm) still fails loudly here,
-    # rather than passing a `> 0.0` check while leaving no real attach
-    # margin. 0.01mm3 is comfortably below the smallest overlap measured at
-    # the current 0.03mm embed (~0.25mm3) with headroom to catch a real
-    # regression, not just float noise.
-    MC_OVERLAP_FLOOR = 0.01
-    for name in ("metric_12mm_1-2in", "sae_5-16in_3-8in"):
-        mc_body, mc_label = multicolor_parts[name]
-        mc_overlap = mc_body.common(mc_label).Volume
-        print("%s: multicolor body/label overlap=%.6f mm3 (embed=%.3fmm)"
-              % (name, mc_overlap, PARAMS["label_embed_multicolor"]))
-        assert mc_overlap > MC_OVERLAP_FLOOR, (
-            "%s: multicolor body/label overlap %.6f mm3 is at or below the "
-            "%.6f mm3 floor - label would not attach or margin is "
-            "negligible" % (name, mc_overlap, MC_OVERLAP_FLOOR))
+    print("\n--- multi-color overlap self-check "
+          "(every distinct label text, per-label adaptive embed) ---")
+    # See check_multicolor_overlap's docstring for why this sweeps every
+    # distinct label text rather than 2 hardcoded pieces (the earlier,
+    # narrower version of this check, which happened to miss the actual
+    # worst-case labels "1"/"7" entirely - the real defect a user's Bambu
+    # Studio import reported).
+    multicolor_overlap_issues = check_multicolor_overlap(PARAMS, multicolor_parts)
+    if multicolor_overlap_issues:
+        for issue in multicolor_overlap_issues:
+            print("MULTICOLOR-OVERLAP: %s" % issue)
+    else:
+        print("every distinct label text's multicolor body/label overlap "
+              "clears the %.2fmm3 floor (target %.2fmm3)"
+              % (MC_OVERLAP_FLOOR, MC_TARGET_OVERLAP_MM3))
+    assert not multicolor_overlap_issues, (
+        "multicolor overlap check failed, see report above")
 
     multicolor_failures = export_multicolor_3mf(multicolor_parts, out_dir)
     export_failures.extend(multicolor_failures)
