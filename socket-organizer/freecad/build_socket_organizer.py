@@ -155,7 +155,23 @@ PARAMS = {
     "nameplate_zone_z":       1.0,
 
     # --- cap (start/end piece) ----------------------------------------------
-    "cap_round_r":     8.0,   # radius of the closed rounded end
+    # Was 8.0, set when base_d was 32.0 (ratio 8/32 = 0.25 of depth - see
+    # make_cap's docstring: the round cylinder only spans 2*r of base_d
+    # centered on the dovetail's Y offset, so material outside that band is
+    # cut flush instead of rounded, making 2*r/base_d the fraction of the
+    # piece's depth that actually reads as a rounded nose rather than a
+    # flat notch). Never revisited when base_d grew to 53.0 (see base_w/
+    # base_d comment above) - at the stale 8.0 that ratio silently dropped
+    # to 2*8/53 = 0.302 (down from 0.50 at the original 8/32), which is why
+    # the cap's rounded end looked like a small isolated notch/bump instead
+    # of the intended graceful rounded closure (confirmed live: a small
+    # cylindrical face patch, not a nose - and matched a user screenshot).
+    # Rescaled to preserve the original ratio: 8.0 / 32.0 * 53.0 = 13.25,
+    # restoring 2*r/base_d back to exactly 0.50. Same "TUNE"-style trap as
+    # dt_clearance/post_af_undersize above - if base_d changes again,
+    # recompute this as cap_round_r/base_d = 0.25 rather than leaving the
+    # absolute mm value behind.
+    "cap_round_r":     13.25,  # radius of the closed rounded end
 
     # --- drives -----------------------------------------------------------
     "drives":          ["3-8in", "1-2in"],
