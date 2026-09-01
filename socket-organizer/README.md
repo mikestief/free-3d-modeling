@@ -88,6 +88,28 @@ assign both objects (body and label) the same filament/AMS slot instead of
 different ones. The 2 end caps have no label or multicolor variant, so
 they keep their plain `<name>.3mf` as before.
 
+## Plate folders — one batch import per drive/size system
+
+[`exports/plates/`](freecad/exports/plates/) groups the `<name>_multicolor.3mf`
+files into 4 ready-to-import sets, one per drive + unit-system combination:
+
+- `plates/3-8in_metric/` — 3/8" drive, metric (6–22mm), 17 pieces
+- `plates/3-8in_sae/` — 3/8" drive, SAE (5/16"–1"), 12 pieces
+- `plates/1-2in_metric/` — 1/2" drive, metric (8–25mm), 18 pieces
+- `plates/1-2in_sae/` — 1/2" drive, SAE (5/16"–1"), 12 pieces
+
+Each folder is self-contained: it also has its own copy of `cap_start.3mf`
+and `cap_end.3mf`, since every row needs both caps regardless of size or
+drive. Drag one whole folder into your slicer and everything needed for
+that plate — all the labeled middle pieces plus both caps — is already
+there; no hunting through the flat file list in `exports/` for the caps
+separately.
+
+These are copies of the same `<name>_multicolor.3mf` files described
+above, not a replacement — the flat originals (and the `.step`/`.stl`/
+`_body`/`_label` files, which aren't duplicated into `plates/`) stay in
+`exports/` as before.
+
 ## Regenerating
 
 ```bash
@@ -97,9 +119,11 @@ freecadcmd build_socket_organizer.py
 
 Needs FreeCAD 1.0+. Outputs land in `exports/` as STEP and STL for every
 piece, plus a plain 3MF for the 2 end caps and 3 coupons (the 59 middle
-pieces get a multi-color 3MF instead — see above). Every run reports fit,
-structural, printability and mesh-health checks — see the repo root
-README for what each one means.
+pieces get a multi-color 3MF instead — see above), and the 4 plate
+folders under `exports/plates/` (see above) are rebuilt from those
+multi-color 3MFs on every run. Every run reports fit, structural,
+printability and mesh-health checks — see the repo root README for what
+each one means.
 
 ---
 

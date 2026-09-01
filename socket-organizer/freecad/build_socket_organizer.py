@@ -31,6 +31,7 @@ SPDX-License-Identifier: MIT
 import os
 import sys
 import math
+import shutil
 import FreeCAD as App
 import Part
 import Mesh
@@ -1556,6 +1557,77 @@ def check_multicolor_3mf_structure(path):
     return n_objects, n_items
 
 
+def organize_plate_folders(p, out_dir, multicolor_failures):
+    """Groups the already-exported <name>_multicolor.3mf files into 4
+    self-contained "plate" folders under out_dir/plates/ - one per
+    drive+unit-system combo (3-8in metric, 3-8in SAE, 1-2in metric, 1-2in
+    SAE) - so a user can batch-import one folder into their slicer per
+    plate instead of hand-picking files out of the flat exports/
+    directory.
+
+    Must run AFTER export_multicolor_3mf() has already written every
+    <name>_multicolor.3mf to out_dir - this only copies files that exist
+    on disk, it does not build or export anything itself.
+
+    Category comes straight from _middle_piece_specs(p) - the same single
+    source of truth every other per-piece self-check reads from - rather
+    than re-deriving drive/unit-system from PARAMS independently: `drive`
+    is yielded directly, and metric-vs-SAE reads off the name's own
+    "metric_"/"sae_" prefix, the same convention _middle_piece_specs uses
+    to build that name in the first place (see its docstring).
+
+    Only <name>_multicolor.3mf is in scope here - .step/.stl/_body/_label
+    files stay flat in out_dir, untouched, per the confirmed scope. Copies
+    via shutil.copy2 (preserves metadata) rather than moves, so the flat
+    originals in out_dir are never disturbed - other formats for the same
+    piece live only there, and nothing else reads from the plates/
+    subfolder.
+
+    cap_start.3mf/cap_end.3mf are duplicated into all 4 folders (not just
+    referenced) since every plate/row needs both caps regardless of
+    drive/unit-system category, and the point of a plate folder is to be a
+    complete, self-contained set a user can import without hunting
+    elsewhere.
+
+    Skips (does not copy, does not raise) any piece whose name is in
+    `multicolor_failures` or whose _multicolor.3mf isn't actually on disk
+    for any other reason - export_multicolor_3mf already logged that
+    failure, and the overall build already fails loudly on it via
+    run()'s `assert not export_failures`, so this step doesn't need its
+    own separate hard failure, only to not crash trying to copy a file
+    that was never written.
+
+    Returns {(drive, system): (dest_dir, n_pieces_copied)} for the
+    caller's own summary reporting."""
+    plates_dir = os.path.join(out_dir, "plates")
+    plate_keys = [("3-8in", "metric"), ("3-8in", "sae"),
+                  ("1-2in", "metric"), ("1-2in", "sae")]
+    plate_dirs = {}
+    for drive, system in plate_keys:
+        dest = os.path.join(plates_dir, "%s_%s" % (drive, system))
+        os.makedirs(dest, exist_ok=True)
+        plate_dirs[(drive, system)] = dest
+
+    counts = {key: 0 for key in plate_keys}
+    for name, drive, _label_text, _nominal_mm in _middle_piece_specs(p):
+        if name in multicolor_failures:
+            continue
+        system = "metric" if name.startswith("metric_") else "sae"
+        src = os.path.join(out_dir, name + "_multicolor.3mf")
+        if not os.path.exists(src):
+            continue
+        shutil.copy2(src, plate_dirs[(drive, system)])
+        counts[(drive, system)] += 1
+
+    for dest in plate_dirs.values():
+        for cap_name in ("cap_start.3mf", "cap_end.3mf"):
+            src = os.path.join(out_dir, cap_name)
+            if os.path.exists(src):
+                shutil.copy2(src, dest)
+
+    return {key: (plate_dirs[key], counts[key]) for key in plate_keys}
+
+
 def run():
     doc = App.newDocument("socket_organizer")
     # Build the 59 middle pieces' (body, label) parts once, then derive the
@@ -1786,6 +1858,20 @@ def run():
     # same "let every shape be attempted first" reasoning as the rest of
     # this function's export handling.
     export_failures.extend(multicolor_structure_issues)
+
+    print("\n--- plate-folder organization "
+          "(grouping _multicolor.3mf by drive+unit-system) ---")
+    # Runs after export_multicolor_3mf/multicolor_failures above so every
+    # _multicolor.3mf that's going to exist already does - see
+    # organize_plate_folders' docstring for why it only copies (shutil.copy2,
+    # preserving the flat originals in out_dir untouched) rather than moves,
+    # and why it silently skips names in multicolor_failures instead of
+    # raising its own error (the overall build already fails loudly on those
+    # via export_failures below).
+    plate_report = organize_plate_folders(PARAMS, out_dir, multicolor_failures)
+    for (drive, system), (dest, n_copied) in sorted(plate_report.items()):
+        print("  %s: %d piece(s) + 2 caps -> %s" % (
+            "%s %s" % (drive, system), n_copied, dest))
 
     coupons = {
         "post_coupon_3-8in": build_post_coupon(PARAMS, "3-8in"),
