@@ -115,9 +115,10 @@ PARAMS = {
     # dt_clearance/post_af_undersize were before their own print history -
     # a plain press fit (not a sliding dovetail) wants a tighter,
     # friction-grip gap than dt_clearance's 0.15mm sliding-fit value, so
-    # 0.125mm/side is chosen as a reasonable FDM starting point roughly
-    # half again tighter, not reused wholesale from a different mechanism.
-    # TUNE VIA NAMEPLATE FIT COUPON before trusting this.
+    # 0.125mm/side (a ~17% reduction from dt_clearance's 0.15mm) is chosen
+    # as a reasonable FDM starting point, not reused wholesale from a
+    # different mechanism. TUNE VIA NAMEPLATE FIT COUPON before trusting
+    # this.
     #
     # Pocket X/Y position is NOT a fixed PARAM - it's derived in
     # _nameplate_pocket_xy from the template's real, live-measured
@@ -218,6 +219,18 @@ SOCKET_OD_WORST_CASE_MM = 36.0
 # tenths of a mm) many times over, plus a real buffer for that OD-model
 # uncertainty.
 OD_CLEARANCE_FLOOR = 1.5
+
+# Minimum headroom (mm) between the piece-to-piece dovetail's own Y-extent
+# (_dovetail_y_offset's result, plus the tail/groove profile's own
+# half-width) and the base's own base_d depth. Unlike OD_CLEARANCE_FLOOR
+# (which reasons about the socket body vs. the footprint), this floor has
+# nothing to do with sockets at all - it's the dovetail geometry itself
+# potentially exceeding the piece's own footprint in Y, a hard containment
+# failure (see _dovetail_y_offset's own assert). 1.0mm is enough to absorb
+# ordinary FDM dimensional tolerance without being so loose it would let a
+# real derivation bug (e.g. dt_tip_w growing unchecked) slip through as
+# "close enough".
+DOVETAIL_Y_OFFSET_HEADROOM_MM = 1.0
 
 
 def estimated_socket_od_mm(nominal_mm):
@@ -377,14 +390,69 @@ def _dovetail_y_offset(p):
     which stays short of the right-side tail's root at x=base_w for every
     dimension this file has used) - see check_socket_od_clearance, which
     already checks both independently and only ever caught the groove
-    side live."""
+    side live.
+
+    PRECONDITION (asserted below, not just assumed): dt_depth < base_w/2 -
+    FUSE_EMBED. This is what makes the groove side, not the tail side, the
+    binding constraint in the first place - the groove's near edge (x=
+    dt_depth) sits closer to the post center (cx=base_w/2) than the tail's
+    embedded root (x=base_w-FUSE_EMBED) does, precisely because dt_depth is
+    kept smaller than that half-width-minus-embed figure. If a future
+    PARAMS change ever grew dt_depth past this bound, the tail side could
+    become the tighter constraint instead and this function's
+    groove-only reasoning would silently stop covering the actual
+    worst case - so this is stated as an explicit, checked fact rather
+    than the implicit assumption it used to be.
+
+    RESULT BOUND (also asserted below): offset + tip must stay within
+    base_d, with DOVETAIL_Y_OFFSET_HEADROOM_MM of real headroom - the
+    dovetail tail/groove's own Y-extent has to physically fit inside the
+    piece it's carved into/protrudes from. Nothing else in this file
+    checks this directly: check_socket_od_clearance only probes the
+    OD-vs-groove relationship this function derives FROM (it never learns
+    the resulting offset), and check_nameplate_fit/check_structural have
+    no visibility into this computation at all. Confirmed live: growing
+    dt_tip_w from 6.0 to 12.0mm (only +2mm) pushes offset+tip to ~46.05mm
+    against base_d=45.0mm - a template that would silently split into 2
+    disconnected solids in make_template() (see check_template_solid),
+    previously only ever caught by accident, via check_cap_solid tripping
+    over the exact same defect in cap_end's shared groove-cutter code."""
     r = worst_case_socket_od_mm() / 2.0
     cx, cy = p["base_w"] / 2.0, p["base_d"] / 2.0
+    assert p["dt_depth"] < p["base_w"] / 2.0 - FUSE_EMBED, (
+        "dt_depth %.2fmm not < base_w/2 - FUSE_EMBED (%.2fmm) - the groove "
+        "side is no longer guaranteed to be the binding constraint over "
+        "the tail side, invalidating this function's groove-only "
+        "reasoning (see docstring PRECONDITION)"
+        % (p["dt_depth"], p["base_w"] / 2.0 - FUSE_EMBED))
     dx = cx - p["dt_depth"]
     dy = math.sqrt(max(r * r - dx * dx, 0.0))
     tip = p["dt_tip_w"] / 2.0 + p["dt_clearance"]
+    # margin: buffer between the worst-case-OD probe's arc (at the
+    # groove's deepest point, x=dt_depth) and the groove cutter's own near
+    # Y-edge, on top of the probe-clearance geometry already computed
+    # above via dx/dy. Plays the same role OD_CLEARANCE_FLOOR does for
+    # check_socket_od_clearance (absorbing FDM tolerance plus this OD
+    # model's own uncertainty) but sized larger - 3.0mm rather than
+    # OD_CLEARANCE_FLOOR's 1.5mm - because it's buffering a multi-step
+    # derived computation (probe radius -> dx -> dy -> offset) rather than
+    # a single measured clearance, and because the RESULT BOUND assert
+    # below is the last line of defense if this margin ever proves
+    # insufficient for some future PARAMS combination; 3.0mm keeps that
+    # assert from firing for every dimension this file has used to date
+    # while still being a deliberate, sized number rather than an
+    # arbitrary one.
     margin = 3.0
-    return cy + dy + tip + margin
+    offset = cy + dy + tip + margin
+    assert offset + tip <= p["base_d"] - DOVETAIL_Y_OFFSET_HEADROOM_MM, (
+        "dovetail Y-offset %.2fmm + tip %.2fmm = %.2fmm exceeds base_d "
+        "%.2fmm (with %.2fmm headroom) - the piece-to-piece dovetail's own "
+        "Y-extent no longer fits inside the base's depth; make_template() "
+        "would produce 2 disconnected solids instead of 1 (see "
+        "check_template_solid)"
+        % (offset, tip, offset + tip, p["base_d"],
+           DOVETAIL_Y_OFFSET_HEADROOM_MM))
+    return offset
 
 
 def make_dovetail_tail(p):
@@ -834,16 +902,48 @@ def check_cap_solid(p, side):
     return None
 
 
+def check_template_solid(p, drive):
+    """Sanity check that make_template(p, drive) produces a single, valid
+    solid - mirrors check_cap_solid's pattern (Solids count == 1 and
+    isValid()), but applied directly to the template's own built output
+    instead of relying on the caps happening to share the same
+    groove-cutter code path (see check_cap_solid's docstring).
+
+    This closes the same gap check_cap_solid closes for caps, but for
+    templates specifically, and independently of whether
+    _dovetail_y_offset's own RESULT BOUND assert (see its docstring)
+    already catches the underlying defect first - belt and suspenders,
+    matching this file's existing redundant-verification philosophy (e.g.
+    check_fuse_overlap and watertight() both independently guard against
+    overlapping failure classes elsewhere). A template's groove cut
+    (make_dovetail_groove_cutter) and nameplate pocket cut are exactly the
+    kind of boolean that can silently split a solid into disconnected
+    pieces if the cutter's geometry drifts far enough - e.g. an
+    unbounded _dovetail_y_offset pushing the groove band far enough
+    toward the back wall to sever the base."""
+    template = make_template(p, drive)
+    n_solids = len(template.Solids)
+    if n_solids != 1 or not template.isValid():
+        return ("template_%s: %d disconnected solids (expected 1), "
+                "isValid=%s" % (drive, n_solids, template.isValid()))
+    return None
+
+
 def check_fuse_overlaps(p):
-    """Runs check_fuse_overlap()/check_cap_solid() across every
-    FUSE_EMBED-dependent boolean in the design: post/base (x2 drives),
-    piece-to-piece dovetail tail/base, both caps, and the nameplate
-    block's own pocket-floor join (used by build_nameplate_coupon)."""
+    """Runs check_fuse_overlap()/check_cap_solid()/check_template_solid()
+    across every FUSE_EMBED-dependent boolean in the design: post/base
+    (x2 drives), piece-to-piece dovetail tail/base, both caps, each
+    drive's template (direct single-solid/validity check on the actual
+    make_template() output), and the nameplate block's own pocket-floor
+    join (used by build_nameplate_coupon)."""
     issues = []
     base_shape = make_base(p)
     for drive in p["drives"]:
         issue = check_fuse_overlap(base_shape, make_post(p, drive),
                                     "post/base fuse (%s)" % drive)
+        if issue:
+            issues.append(issue)
+        issue = check_template_solid(p, drive)
         if issue:
             issues.append(issue)
     issue = check_fuse_overlap(base_shape, make_dovetail_tail(p),
@@ -1094,8 +1194,8 @@ def run():
     else:
         print("all FUSE_EMBED-dependent fuses have genuine volumetric "
               "overlap (post/base x%d drives, dovetail tail/base, "
-              "both caps are single valid solids, nameplate block/"
-              "pocket-floor)" % len(PARAMS["drives"]))
+              "both caps and both drives' templates are single valid "
+              "solids, nameplate block/pocket-floor)" % len(PARAMS["drives"]))
 
     print("\n--- nameplate pocket/block fit self-check "
           "(real B-rep containment/collision/footprint/floor) ---")
