@@ -2,29 +2,51 @@
 """
 Socket organizer - parametric generator for FreeCAD.
 
-Modular, interlinking socket holder. Exactly 5 piece types, size-agnostic:
+Modular, interlinking socket holder. 9 piece types, size-agnostic within
+each tier:
 
-  - template_3-8in / template_1-2in - a blank base+post template, one per
-    drive (3/8in / 1/2in). The post's cross-section only depends on the
+  - template_{tier}_{drive} - a blank base+post template, one per tier
+    (small/medium/large - see TIERS below) x drive (3/8in / 1/2in), 6
+    combinations total. The post's cross-section only depends on the
     drive square, NOT which socket size sits on it - every socket of a
     given drive shares the same square drive-hole - so one blank template
     per drive already physically fits every socket size in that drive.
-    No baked text anywhere. Has a plain rectangular pocket inset straight
-    down into the TOP of the riser, in front of the post, for a nameplate
-    to press into (see below), plus the usual piece-to-piece dovetail
-    tail/groove for joining templates and caps into a row.
-  - cap_start / cap_end - unchanged row-end pieces, still blank.
+    `tier` only changes the template's WIDTH (base_w) - everything else
+    (depth, height, post position in Y, nameplate pocket, piece-to-piece
+    dovetail) is shared/identical across all 3 tiers, see PARAMS["tiers"]
+    and the "tier architecture" comment below for why. No baked text
+    anywhere. Has a plain rectangular pocket inset straight down into the
+    TOP of the riser, in front of the post, for a nameplate to press into
+    (see below), plus the usual piece-to-piece dovetail tail/groove for
+    joining templates and caps into a row - ANY tier's template
+    interlocks with ANY other tier's (or a cap), since that dovetail's
+    position never varies by tier.
+  - cap_start / cap_end - row-end pieces, still blank, now shrunk to their
+    own cap_w footprint (narrower than any template tier - see PARAMS
+    comment) since a cap carries no post/pocket, just the dovetail
+    connector.
   - nameplate_template - a single blank rectangular block that presses
     straight down into a template's top pocket, snug/friction fit, sitting
-    flush with the riser's top surface once seated. Print as many copies
-    as you like and label each one with your slicer's own text tool (e.g.
-    Bambu Studio) - this generator no longer bakes any size text into
-    geometry at all. See nameplate_w/h/t/clearance below for the
-    block/pocket dimensions - TUNE VIA NAMEPLATE FIT COUPON.
+    flush with the riser's top surface once seated. Fits every tier's
+    pocket identically (pocket size/position-relative-to-post never varies
+    by tier). Print as many copies as you like and label each one with
+    your slicer's own text tool (e.g. Bambu Studio) - this generator no
+    longer bakes any size text into geometry at all. See nameplate_w/h/t/
+    clearance below for the block/pocket dimensions - TUNE VIA NAMEPLATE
+    FIT COUPON.
 
 Pieces snap together with a vertical dovetail (press down to seat, lift
 straight up to remove) so any single piece can be pulled without
 disturbing its neighbours.
+
+Picking a tier: match the tier's socket range (see PARAMS["tiers"]) to
+the sockets you're actually storing on that piece - a small drive-size
+socket (say 3/8in drive, 8mm) prints smaller/cheaper on a "small" tier
+template. Nothing in the geometry stops you from resting an oversized
+socket on a small/medium tier's post (the post itself is sized by DRIVE,
+not by tier) - pick the tier the same way you'd pick the right size bin
+for anything; this is an inherent property of a post-style design, not a
+defect the geometry tries to engineer around.
 
 Running it
 ----------
@@ -35,8 +57,9 @@ Headless (no GUI needed)::
 Outputs land in ./exports as STEP, STL and 3MF.
 
 Print the fit coupons (post_coupon_3-8in.stl, post_coupon_1-2in.stl,
-dovetail_coupon.stl, nameplate_coupon.stl) before committing to a full
-print run.
+dovetail_coupon.stl, dovetail_coupon_cross_tier.stl,
+cap_coupon_small.stl, cap_coupon_medium.stl, nameplate_coupon.stl) before
+committing to a full print run.
 
 Copyright (c) 2026 Oxidized Apps, LLC
 SPDX-License-Identifier: MIT
@@ -53,7 +76,26 @@ import Part
 # --------------------------------------------------------------------------
 
 PARAMS = {
-    # --- base footprint (same for every piece) -----------------------------
+    # --- base footprint --------------------------------------------------
+    # base_d/base_h are shared/identical across every piece (all 3 template
+    # tiers AND the caps) - only base_w (the row-direction / left-right
+    # pitch) varies, see "tiers" below. That's a deliberate architectural
+    # decision, not an oversight: base_d/base_h/post_h/the post's Y-center
+    # (cy, from _post_cy)/the nameplate pocket's position/the piece-to-
+    # piece dovetail's Y-offset (_dovetail_y_offset) were all derived
+    # against the LARGE tier's 36mm worst-case socket specifically, so
+    # that (a) every tier's pieces have flush front/back edges when joined
+    # in a mixed row (base_d is the fixed "length" dimension), (b) the
+    # nameplate pocket is automatically even MORE clear of a smaller
+    # tier's smaller socket footprint than it is of Large's (extra safety
+    # margin, no new derivation needed - verified live, see run()'s
+    # per-tier nameplate-socket margin report), and (c) the dovetail
+    # connector sits at the exact same Y-position on every tier's piece
+    # (and the caps), so ANY tier's template can interlock with ANY other
+    # tier's template, or a cap, in a mixed row - verified live via the
+    # cross-tier and cap dovetail coupons (build_dovetail_cross_tier_
+    # coupon, build_cap_template_coupon).
+    #
     # base_w/base_d were 43.0/53.0 (see git history) with a sloped front
     # wall and a wall-mounted dovetail-slot nameplate. That mechanism
     # didn't print cleanly, so the nameplate moved to a plain top-of-base
@@ -79,12 +121,12 @@ PARAMS = {
     # from worst_case_socket_od_mm(), nameplate_h/nameplate_clearance, and
     # NAMEPLATE_MARGIN_MM so it can't silently drift out of sync with any
     # of those), which works out to cy=30.75mm at the current PARAMS.
-    # base_d grew from 45.0 to 51.0 (base_w stays 40.0 - it's sized off
-    # the socket OD in X, which this change doesn't touch, re-verified
-    # live via check_socket_od_clearance's left/right margins, unchanged
-    # at 2.0mm each) so the back-biased worst-case-OD probe still clears
-    # the back wall by NAMEPLATE_MARGIN_MM (2.25mm) of real margin:
-    # base_d = cy + r + NAMEPLATE_MARGIN_MM = 30.75 + 18.0 + 2.25 = 51.0.
+    # base_d grew from 45.0 to 51.0 (base_w stays 40.0 for the large tier -
+    # it's sized off the socket OD in X, which this change doesn't touch,
+    # re-verified live via check_socket_od_clearance's left/right margins,
+    # unchanged at 2.0mm each) so the back-biased worst-case-OD probe
+    # still clears the back wall by NAMEPLATE_MARGIN_MM (2.25mm) of real
+    # margin: base_d = cy + r + NAMEPLATE_MARGIN_MM = 30.75+18.0+2.25=51.0.
     # See NAMEPLATE_MARGIN_MM's own comment and _post_cy's docstring for
     # the full derivation, and check_socket_nameplate_clearance() for the
     # live B-rep proof that the pocket and the worst-case socket probe now
@@ -106,9 +148,56 @@ PARAMS = {
     # these dimensions via real B-rep booleans, not assumed from this
     # comment - see those functions' own docstrings/prints for the actual
     # measured numbers.
-    "base_w":         40.0,   # left-right, this is the row-direction pitch
+    #
+    # --- tiers: ONLY base_w (and the post's X-center, cx=base_w/2) vary
+    # per tier - everything else in this file is shared, see the block
+    # comment above. target_od is the tier's own worst-case socket OD
+    # (mm), used by the tier-aware check_socket_od_clearance to verify
+    # THAT tier's own base_w against THAT tier's own socket, not the
+    # global 36mm figure (which only the "large" tier actually uses).
+    #
+    # A real live-verification finding, not assumed from the naive
+    # od+2*margin arithmetic that produced the ~21/~28mm approximate
+    # table this was originally scoped from: base_w has a SECOND, tier-
+    # INDEPENDENT floor, set by the shared/fixed-size nameplate pocket -
+    # the pocket cavity itself (nameplate_w+2*nameplate_clearance=24.25mm)
+    # plus check_nameplate_fit's own 2.0mm-per-side footprint-margin
+    # minimum means NO tier can go narrower than ~28.25mm no matter how
+    # small its target_od is (the pocket physically would not fit
+    # centered in a narrower piece with any margin at all - verified live
+    # via check_nameplate_fit's per-tier footprint-margin numbers, see
+    # run()'s report). So "small"/"medium" are both bound by this shared
+    # nameplate floor rather than by their own (much smaller) target_od -
+    # they end up close in width to each other, and only "large" is
+    # actually OD-bound (its 36mm target_od needs more room than the
+    # nameplate floor does). This is a real, discovered property of
+    # keeping the nameplate mechanism a single fixed size across every
+    # tier (see PARAMS's nameplate_w/h/t/clearance comment below), not a
+    # per-tier redesign of the nameplate - narrowing "small"/"medium"
+    # further than this would need either a smaller nameplate or dropping
+    # the pocket from those tiers, both out of scope here.
+    "tiers": {
+        "small":  {"base_w": 30.0, "target_od": 17.0},  # 6-12mm sockets
+        "medium": {"base_w": 31.0, "target_od": 24.0},  # 13-19mm sockets
+        "large":  {"base_w": 40.0, "target_od": 36.0},  # 20-25mm sockets
+    },
     "base_d":         51.0,   # front-to-back depth
     "base_h":         15.0,   # riser height before the post/socket area
+
+    # --- end cap footprint (shrunk vs. any template tier - see make_cap) --
+    # A cap carries no post and no nameplate pocket, only the dovetail
+    # connector (root at the fused/cut edge, tip dt_depth=4.0mm out) - so
+    # it doesn't need template-tier width at all. cap_w=12.0mm leaves an
+    # 8.0mm solid wall behind the groove cut (cap_w - dt_depth), well
+    # above this file's ~1.2-2mm structural wall minimum (check_
+    # structural) and enough real material around the tail's hook shape
+    # (dt_tip_w=6.0 > dt_neck_w=4.0) not to be fragile - live-verified via
+    # check_structural, watertight()/check_printability on both caps, and
+    # check_fuse_overlap on the tail/base fuse at this width (see run()'s
+    # report for the actual numbers). Same base_d/base_h as every
+    # template tier, so caps still align flush front-to-back and
+    # top-to-bottom when joined into a mixed row (see make_cap).
+    "cap_w":          12.0,
 
     # --- post (drive-square friction mount) ---------------------------------
     # "af" = across-flats. Post af is undersized vs. the nominal drive
@@ -341,16 +430,21 @@ def box(l, w, h, x, y, z):
 # Geometry - base and post
 # --------------------------------------------------------------------------
 
-def make_base(p):
-    """Riser block: a plain rectangular box (base_w x base_d x base_h), no
-    wedge cut, no sloped wall. The front wall used to lean back
-    (front_slope_deg, now removed) specifically to angle a wall-mounted
-    nameplate for visibility; now that the nameplate lives in a top-of-base
-    inset pocket instead (see make_nameplate_pocket_cutter), there's no
-    reason for the slope any more. Front is still the -Y face, for
-    consistency with every other piece/coupon's convention (the post and
-    the new pocket both sit toward +Y from it)."""
-    return box(p["base_w"], p["base_d"], p["base_h"], 0, 0, 0)
+def make_base(p, width):
+    """Riser block: a plain rectangular box (width x base_d x base_h), no
+    wedge cut, no sloped wall. `width` is an explicit parameter, not read
+    from PARAMS directly, because it now varies by caller: a template
+    tier's own base_w (see PARAMS["tiers"]) or the shared cap_w for caps
+    (see make_cap) - base_d/base_h are the only dimensions still always
+    read straight from PARAMS, since those stay identical across every
+    piece (see PARAMS's tier-architecture comment). The front wall used to
+    lean back (front_slope_deg, now removed) specifically to angle a
+    wall-mounted nameplate for visibility; now that the nameplate lives in
+    a top-of-base inset pocket instead (see make_nameplate_pocket_cutter),
+    there's no reason for the slope any more. Front is still the -Y face,
+    for consistency with every other piece/coupon's convention (the post
+    and the new pocket both sit toward +Y from it)."""
+    return box(width, p["base_d"], p["base_h"], 0, 0, 0)
 
 
 def _post_cy(p):
@@ -399,26 +493,38 @@ def _post_cy(p):
     return pocket_y1 + NAMEPLATE_MARGIN_MM + r
 
 
-def _post_center(p):
-    """(cx, cy) for the post's centerline on the riser's top footprint -
-    single source of truth used by every function that places or probes
-    the post, the piece-to-piece dovetail's Y-offset, and the nameplate
-    pocket, so none of them can silently drift apart. cx stays a simple
-    base_w/2 centering (the post's X placement has nothing to do with the
-    nameplate - only base_w, which is sized off the socket OD in X, drives
-    it); cy is back-biased away from the nameplate pocket, see
-    _post_cy."""
-    return p["base_w"] / 2.0, _post_cy(p)
+def _post_center(p, tier):
+    """(cx, cy) for the post's centerline on the given tier's riser top
+    footprint - single source of truth used by every function that places
+    or probes the post and the nameplate pocket for a given tier, so none
+    of them can silently drift apart. cx is a simple (tier's own base_w)/2
+    centering (the post's X placement has nothing to do with the
+    nameplate - only base_w, which is sized off that tier's own socket OD
+    in X, drives it - see PARAMS["tiers"]); cy is back-biased away from
+    the nameplate pocket, see _post_cy - and, per the tier architecture
+    (PARAMS's comment), cy does NOT depend on tier at all (_post_cy takes
+    no tier argument), so it's identical for every piece.
+
+    NOT used by the piece-to-piece dovetail's own Y-offset derivation
+    (_dovetail_y_offset) - that one deliberately uses a fixed reference cx
+    (the LARGE tier's own base_w/2), not whatever tier is being built, so
+    the dovetail's Y-position stays identical across every tier/cap - see
+    _dovetail_y_offset's docstring."""
+    return p["tiers"][tier]["base_w"] / 2.0, _post_cy(p)
 
 
-def make_post(p, drive):
+def make_post(p, drive, tier):
     """Square post, corners rounded, sized to the drive square (undersized
-    for friction). Centered in X on the riser's top footprint, back-biased
-    in Y (see _post_center/_post_cy) so the worst-case socket's own
-    circular footprint clears the nameplate pocket with real margin,
-    rather than the old cy=base_d/2 centering (proven live to let a
-    worst-case socket's footprint reach into the pocket - see
-    NAMEPLATE_MARGIN_MM's docstring).
+    for friction) - the post's cross-section is drive-only, NOT tier
+    (every socket of a given drive shares the same drive-square hole), so
+    `tier` only affects WHERE this post sits in X (via _post_center's
+    cx=tier's base_w/2), not its own shape. Centered in X on the riser's
+    top footprint, back-biased in Y (see _post_center/_post_cy, which is
+    the same for every tier) so the worst-case socket's own circular
+    footprint clears the nameplate pocket with real margin, rather than
+    the old cy=base_d/2 centering (proven live to let a worst-case
+    socket's footprint reach into the pocket - see NAMEPLATE_MARGIN_MM's
+    docstring).
 
     The bottom face is pushed FUSE_EMBED below z=0 (extending the extrusion
     height to compensate, so the top - where post_top_chamfer's edge lookup
@@ -433,7 +539,7 @@ def make_post(p, drive):
     "Fuse-overlap self-checks"), which needs no mesh at all."""
     af = p["drive_af_nominal"][drive] - p["post_af_undersize"]
     r = p["post_corner_r"]
-    cx, cy = _post_center(p)
+    cx, cy = _post_center(p, tier)
     half = af / 2.0 - r
     pts = []
     for sx, sy in ((1, 1), (-1, 1), (-1, -1), (1, -1)):
@@ -478,7 +584,21 @@ def _dt_profile(p, outward, clearance=0.0, root_embed=0.0):
 
 
 def _dovetail_y_offset(p):
-    """Y-offset (translate) for the piece-to-piece dovetail tail/groove.
+    """Y-offset (translate) for the piece-to-piece dovetail tail/groove -
+    a SINGLE value, shared/identical across every tier and the caps (see
+    PARAMS's tier-architecture comment). This is what makes ANY tier's
+    template interlock with ANY other tier's template (or a cap): the
+    dovetail's Y-position never varies with the piece's own width.
+
+    Deliberately computed against a FIXED reference cx - the LARGE tier's
+    own base_w/2 (PARAMS["tiers"]["large"]["base_w"]/2.0), NOT whatever
+    tier is actually being built (unlike _post_center, which does vary
+    cx by tier for the post/nameplate-pocket placement). Large is the
+    binding/worst case (biggest base_w, biggest target_od), so deriving
+    the offset against it is what guarantees every OTHER (narrower,
+    smaller-OD) tier's own real socket probe clears the groove/tail with
+    even MORE margin - verified live per-tier by check_socket_od_
+    clearance rather than just assumed, see that function's docstring.
 
     Used to be a fixed simple fraction of base_d (base_d*0.3 = 13.5mm at
     base_d=45.0) - unrelated to the nameplate mechanism, so that fraction
@@ -537,22 +657,27 @@ def _dovetail_y_offset(p):
     previously only ever caught by accident, via check_cap_solid tripping
     over the exact same defect in cap_end's shared groove-cutter code.
 
-    NOTE on cy: this now calls _post_center(p) (back-biased, see _post_cy -
+    NOTE on cy: this now uses _post_cy(p) (back-biased, see its docstring -
     the nameplate-overlap fix) rather than the base_d/2 centering described
-    above. dx (=cx-dt_depth) and dy (the probe's Y half-reach at the
-    groove's deepest point) are UNCHANGED by that - both depend only on
-    cx/r, not cy - but the resulting `offset` grows since it's
-    cy + dy + tip + margin. Verified live via this function's own RESULT
-    BOUND assert below (not just assumed to still hold), and independently
-    via check_template_solid."""
+    above. cy is tier-independent (see PARAMS's tier-architecture
+    comment), so it's safe to use directly here regardless of which piece
+    ultimately gets built with this offset. dx (=cx-dt_depth, cx now the
+    fixed LARGE-tier reference described above) and dy (the probe's Y
+    half-reach at the groove's deepest point) are UNCHANGED by the cy
+    back-bias - both depend only on cx/r, not cy - but the resulting
+    `offset` grows since it's cy + dy + tip + margin. Verified live via
+    this function's own RESULT BOUND assert below (not just assumed to
+    still hold), and independently via check_template_solid."""
     r = worst_case_socket_od_mm() / 2.0
-    cx, cy = _post_center(p)
-    assert p["dt_depth"] < p["base_w"] / 2.0 - FUSE_EMBED, (
-        "dt_depth %.2fmm not < base_w/2 - FUSE_EMBED (%.2fmm) - the groove "
-        "side is no longer guaranteed to be the binding constraint over "
-        "the tail side, invalidating this function's groove-only "
-        "reasoning (see docstring PRECONDITION)"
-        % (p["dt_depth"], p["base_w"] / 2.0 - FUSE_EMBED))
+    cy = _post_cy(p)
+    ref_base_w = p["tiers"]["large"]["base_w"]
+    cx = ref_base_w / 2.0
+    assert p["dt_depth"] < ref_base_w / 2.0 - FUSE_EMBED, (
+        "dt_depth %.2fmm not < large tier's base_w/2 - FUSE_EMBED (%.2fmm) "
+        "- the groove side is no longer guaranteed to be the binding "
+        "constraint over the tail side, invalidating this function's "
+        "groove-only reasoning (see docstring PRECONDITION)"
+        % (p["dt_depth"], ref_base_w / 2.0 - FUSE_EMBED))
     dx = cx - p["dt_depth"]
     dy = math.sqrt(max(r * r - dx * dx, 0.0))
     tip = p["dt_tip_w"] / 2.0 + p["dt_clearance"]
@@ -583,13 +708,18 @@ def _dovetail_y_offset(p):
     return offset
 
 
-def make_dovetail_tail(p):
+def make_dovetail_tail(p, width):
     """Protrudes from the base's right (+X) side, full base height.
+    `width` is the actual footprint width of the piece this gets fused
+    onto (a template tier's own base_w, or cap_w for a cap - see
+    make_base) - only WHERE the tail sits in X; the tail's own profile and
+    Y-offset never depend on it (see _dovetail_y_offset's docstring on why
+    the Y-offset is a single shared reference value).
 
-    root_embed=FUSE_EMBED pushes the root face FUSE_EMBED past x=base_w
+    root_embed=FUSE_EMBED pushes the root face FUSE_EMBED past x=width
     into the base's own solid before make_template/make_cap fuse this onto
     the base, so the fuse has genuine volumetric overlap rather than a
-    zero-gap tangent touch at x=base_w (see make_post's docstring). As with
+    zero-gap tangent touch at x=width (see make_post's docstring). As with
     make_post, mesh self-intersection distance alone cannot be trusted to
     catch a reverted FUSE_EMBED here - see check_fuse_overlap(), which
     asserts base.common(tail).Volume > 0 directly. The outward-facing tip
@@ -597,14 +727,18 @@ def make_dovetail_tail(p):
     untouched.
 
     Y-offset is computed by _dovetail_y_offset - see its docstring for why
-    this is no longer a fixed fraction of base_d."""
+    this is a single fixed value shared by every tier and cap, not a
+    fraction of base_d nor dependent on `width`."""
     face = _dt_profile(p, outward=True, root_embed=FUSE_EMBED)
     solid = face.extrude(App.Vector(0, 0, p["base_h"]))
-    return solid.translate(App.Vector(p["base_w"], _dovetail_y_offset(p), 0))
+    return solid.translate(App.Vector(width, _dovetail_y_offset(p), 0))
 
 
 def make_dovetail_groove_cutter(p):
     """Cutter for the base's left (0) side - slightly oversized for snap fit.
+    No `width` parameter needed (unlike make_dovetail_tail) - this always
+    carves at local x in [0, dt_depth], regardless of the piece's own
+    footprint width, so it's identical for every tier and the caps.
 
     Must carve INTO the base's own solid (local x in [0, dt_depth], same
     +X sign as the tail), not out into empty space beyond x=0 - otherwise
@@ -619,11 +753,14 @@ def make_dovetail_groove_cutter(p):
 # Geometry - nameplate pocket/block (top-of-base inset, straight press fit)
 # --------------------------------------------------------------------------
 
-def _nameplate_pocket_xy(p):
+def _nameplate_pocket_xy(p, tier):
     """World XY origin (min-X, min-Y corner) of the nameplate pocket
     CAVITY footprint (nameplate_w/h plus nameplate_clearance on every
-    side) - centered in X on the template (base_w/2, the same X-center the
-    post itself uses).
+    side) - centered in X on the given tier's own template ((tier's
+    base_w)/2, the same X-center _post_center's cx uses for that tier).
+    The pocket's SIZE and Y-placement never vary by tier (see PARAMS's
+    tier-architecture comment); only this X-centering does, tracking
+    whichever tier's own (narrower or wider) base_w it's cut into.
 
     Y placement used to be centered in the gap between the front wall and
     the POST's own (small) front edge (_post_front_edge_y, since removed -
@@ -645,20 +782,22 @@ def _nameplate_pocket_xy(p):
     nameplate_clearance() for the live B-rep proof that the resulting
     pocket and the worst-case socket probe genuinely never overlap."""
     w = p["nameplate_w"] + 2 * p["nameplate_clearance"]
-    x0 = p["base_w"] / 2.0 - w / 2.0
+    x0 = p["tiers"][tier]["base_w"] / 2.0 - w / 2.0
     y0 = NAMEPLATE_MARGIN_MM
     return x0, y0
 
 
-def make_nameplate_pocket_cutter(p):
-    """Plain rectangular cutter for the nameplate pocket: nameplate_w/h
-    plus nameplate_clearance per side (a snug press-fit gap, not a sliding
-    dovetail clearance - TUNE VIA NAMEPLATE FIT COUPON), cut straight down
-    (world Z, no rotation at all - the front wall is vertical now and this
-    pocket sits on the flat top face, so none of the old sloped-wall
-    rotate/translate machinery applies here) exactly nameplate_t deep, so
-    the nameplate block sits flush with the riser's top surface once
-    seated, not proud.
+def make_nameplate_pocket_cutter(p, tier):
+    """Plain rectangular cutter for the given tier's nameplate pocket:
+    nameplate_w/h plus nameplate_clearance per side (a snug press-fit gap,
+    not a sliding dovetail clearance - TUNE VIA NAMEPLATE FIT COUPON), cut
+    straight down (world Z, no rotation at all - the front wall is
+    vertical now and this pocket sits on the flat top face, so none of the
+    old sloped-wall rotate/translate machinery applies here) exactly
+    nameplate_t deep, so the nameplate block sits flush with the riser's
+    top surface once seated, not proud. `tier` only shifts this cutter's
+    X-centering (see _nameplate_pocket_xy) - the cavity's own size and Y
+    position are identical for every tier.
 
     The cutter's floor sits at EXACTLY z=base_h-nameplate_t, with no
     overshoot there - that plane is a hard structural/fit requirement (the
@@ -676,7 +815,7 @@ def make_nameplate_pocket_cutter(p):
     w = p["nameplate_w"] + 2 * p["nameplate_clearance"]
     h = p["nameplate_h"] + 2 * p["nameplate_clearance"]
     t = p["nameplate_t"]
-    x0, y0 = _nameplate_pocket_xy(p)
+    x0, y0 = _nameplate_pocket_xy(p, tier)
     overshoot = 1.0
     return box(w, h, t + overshoot, x0, y0, p["base_h"] - t)
 
@@ -695,13 +834,14 @@ def make_nameplate(p):
     return box(p["nameplate_w"], p["nameplate_h"], p["nameplate_t"], 0, 0, 0)
 
 
-def _nameplate_block_in_pocket(p, embed=0.0):
+def _nameplate_block_in_pocket(p, tier, embed=0.0):
     """The ACTUAL nameplate block (real nameplate_w/h/t dimensions, no
     clearance added - the physical object that has to fit inside the
     pocket, not the oversized cutter) positioned at its real seated
-    position: centered inside the pocket cavity's own footprint (so the
-    clearance gap splits evenly on every side) and resting on the pocket's
-    floor, flush with the riser's top surface (z=base_h) at the top.
+    position for the given tier: centered inside that tier's pocket
+    cavity footprint (so the clearance gap splits evenly on every side)
+    and resting on the pocket's floor, flush with the riser's top surface
+    (z=base_h) at the top.
 
     `embed` extends the block's BOTTOM face `embed` further down, past the
     floor plane, into the solid riser material below the pocket, while
@@ -713,7 +853,7 @@ def _nameplate_block_in_pocket(p, embed=0.0):
     fuse defect here otherwise). check_nameplate_fit's containment check
     uses embed=0 - the real, unmodified seated position - since that check
     is a pure containment test against the cavity, not a fuse."""
-    cav_x0, cav_y0 = _nameplate_pocket_xy(p)
+    cav_x0, cav_y0 = _nameplate_pocket_xy(p, tier)
     cav_w = p["nameplate_w"] + 2 * p["nameplate_clearance"]
     cav_h = p["nameplate_h"] + 2 * p["nameplate_clearance"]
     x0 = cav_x0 + (cav_w - p["nameplate_w"]) / 2.0
@@ -723,21 +863,27 @@ def _nameplate_block_in_pocket(p, embed=0.0):
     return box(p["nameplate_w"], p["nameplate_h"], height, x0, y0, z0)
 
 
-def make_template(p, drive):
-    """Blank template piece: base + drive-specific post (recentered, see
-    make_post) + the unchanged piece-to-piece dovetail tail/groove (for
-    joining templates and caps into a row) + a plain rectangular pocket cut
+def make_template(p, drive, tier):
+    """Blank template piece: base (at this tier's own base_w, see
+    make_base) + drive-specific post (recentered per-tier, see make_post)
+    + the shared piece-to-piece dovetail tail/groove (for joining
+    templates and caps into a row - Y-position identical across every
+    tier/cap, see _dovetail_y_offset) + a plain rectangular pocket cut
     straight down into the riser's top surface, in front of the post, for
-    a nameplate to press into.
+    a nameplate to press into (X-centered per-tier, Y-position/size
+    identical across every tier, see _nameplate_pocket_xy).
 
-    NO baked text anywhere. `drive` is the only thing that varies between
-    the two templates - the post's cross-section (see PARAMS's comment on
-    drive_af_nominal), not the socket size, which no longer has any effect
-    on this piece's geometry at all (see module docstring)."""
-    body = make_base(p).fuse(make_post(p, drive))
-    body = body.fuse(make_dovetail_tail(p))
+    NO baked text anywhere. `drive` varies the post's cross-section (see
+    PARAMS's comment on drive_af_nominal), not the socket size, which
+    still has no effect on this piece's geometry at all (see module
+    docstring). `tier` varies only this template's own base_w (and
+    therefore the post/pocket X-centering derived from it) - see
+    PARAMS["tiers"] and its architecture comment."""
+    width = p["tiers"][tier]["base_w"]
+    body = make_base(p, width).fuse(make_post(p, drive, tier))
+    body = body.fuse(make_dovetail_tail(p, width))
     body = body.cut(make_dovetail_groove_cutter(p))
-    body = body.cut(make_nameplate_pocket_cutter(p))
+    body = body.cut(make_nameplate_pocket_cutter(p, tier))
     return body
 
 
@@ -749,13 +895,24 @@ def make_cap(p, side):
     """side='start' has a tail on its right edge (mates leftward into the
     row); side='end' has a groove on its left edge (mates rightward). The
     opposite edge is left as make_base's own flat, square end - no cut
-    there at all."""
+    there at all.
+
+    Builds its own base block at cap_w (not any template tier's base_w -
+    a cap has no post and no nameplate pocket, nothing that needs
+    template width, see PARAMS's cap_w comment) x base_d x base_h - same
+    base_d/base_h as every template tier, so caps still align flush
+    front-to-back and top-to-bottom when joined into a mixed row. The
+    dovetail tail/groove sit at the exact same shared Y-offset every
+    template tier uses (see _dovetail_y_offset), which is what lets one
+    cap design interlock with every tier without modification - verified
+    live via build_cap_template_coupon against 2 different tiers."""
     if side not in ("start", "end"):
         raise ValueError("side must be 'start' or 'end', got %r" % side)
 
-    body = make_base(p)
+    width = p["cap_w"]
+    body = make_base(p, width)
     if side == "start":
-        body = body.fuse(make_dovetail_tail(p))
+        body = body.fuse(make_dovetail_tail(p, width))
     else:
         body = body.cut(make_dovetail_groove_cutter(p))
     return body
@@ -766,14 +923,15 @@ def make_cap(p, side):
 # --------------------------------------------------------------------------
 
 def generate_all(p):
-    """Returns {name: shape} for exactly the 5 piece types this generator
-    produces: template_3-8in, template_1-2in, cap_start, cap_end,
-    nameplate_template. Single source of truth for the piece set - run()
-    derives its expected-count assertion from len() of this dict rather
-    than a hardcoded number."""
+    """Returns {name: shape} for exactly the 9 piece types this generator
+    produces: template_{tier}_{drive} for all 3 tiers x 2 drives (6
+    templates), cap_start, cap_end, nameplate_template. Single source of
+    truth for the piece set - run() derives its expected-count assertion
+    from len() of this dict rather than a hardcoded number."""
     out = {}
-    for drive in p["drives"]:
-        out["template_%s" % drive] = make_template(p, drive)
+    for tier in p["tiers"]:
+        for drive in p["drives"]:
+            out["template_%s_%s" % (tier, drive)] = make_template(p, drive, tier)
     out["cap_start"] = make_cap(p, "start")
     out["cap_end"] = make_cap(p, "end")
     out["nameplate_template"] = make_nameplate(p)
@@ -784,33 +942,85 @@ def generate_all(p):
 # Fit coupons
 # --------------------------------------------------------------------------
 
-def build_post_coupon(p, drive):
+def build_post_coupon(p, drive, tier="large"):
     """A single template, for real-socket test fit. Size no longer matters
     (every socket of a given drive shares the same post - see module
     docstring) - only drive does, so this is just make_template unchanged,
-    unlike the old per-size middle piece it used to build."""
-    return make_template(p, drive)
+    unlike the old per-size middle piece it used to build. `tier` doesn't
+    affect the post itself either (post geometry is tier-independent, see
+    make_post's docstring) - defaults to "large" arbitrarily, matching the
+    historical "one coupon per drive" convention (2 coupons total, not 6)."""
+    return make_template(p, drive, tier)
 
 
-def build_dovetail_coupon(p):
-    """Two adjacent templates, pre-assembled, to test the piece-to-piece
-    snap by hand. Drive doesn't matter for this - the piece-to-piece
-    dovetail geometry is identical regardless of drive - so this uses
-    3-8in arbitrarily."""
-    a = make_template(p, "3-8in")
-    b = make_template(p, "3-8in").translate(App.Vector(p["base_w"], 0, 0))
+def build_dovetail_coupon(p, tier="large"):
+    """Two adjacent SAME-tier templates, pre-assembled, to test the
+    piece-to-piece snap by hand - the regression case (unchanged from
+    before the tier split, just parameterized). Drive doesn't matter for
+    this - the piece-to-piece dovetail geometry is identical regardless of
+    drive - so this uses 3-8in arbitrarily; tier defaults to "large" to
+    match the pre-tier-split coupon's own dimensions.
+
+    See build_dovetail_cross_tier_coupon for the NEW cross-tier case this
+    feature specifically needs to prove (two DIFFERENT tiers interlocking
+    at the same shared Y-offset)."""
+    width = p["tiers"][tier]["base_w"]
+    a = make_template(p, "3-8in", tier)
+    b = make_template(p, "3-8in", tier).translate(App.Vector(width, 0, 0))
     return a.fuse(b)
 
 
-def build_nameplate_coupon(p):
+def build_dovetail_cross_tier_coupon(p, tier_a="small", tier_b="medium"):
+    """Two adjacent DIFFERENT-tier templates, pre-assembled - the direct
+    proof that the piece-to-piece dovetail's shared/identical Y-offset
+    (see _dovetail_y_offset) really does let any tier interlock with any
+    other, not just same-tier rows. tier_a's tail (at world x=tier_a's own
+    base_w) must line up, in Y, with tier_b's groove (always at local x in
+    [0, dt_depth]) regardless of the two tiers' different widths - this
+    coupon fuses them at that real offset so the alignment is checked by
+    a real B-rep fuse into 1 solid, not just asserted from the shared
+    formula. Defaults to small+medium (the two narrower, closer-in-size
+    tiers) since large-vs-either is already implicitly covered by every
+    per-tier check_socket_od_clearance/check_nameplate_fit call sharing
+    the same _dovetail_y_offset() value."""
+    width_a = p["tiers"][tier_a]["base_w"]
+    a = make_template(p, "3-8in", tier_a)
+    b = make_template(p, "3-8in", tier_b).translate(App.Vector(width_a, 0, 0))
+    return a.fuse(b)
+
+
+def build_cap_template_coupon(p, tier):
+    """A shrunk cap_start (tail on its right edge) fused to the given
+    tier's template (groove on its left edge), at the real world offset
+    (cap_w) - proves the shrunk cap really interlocks with that tier,
+    using the same shared dovetail Y-offset every template tier and the
+    cap itself share (see _dovetail_y_offset). Called once per tier in
+    run() (at least 2 different tiers, per this feature's own requirement)
+    to confirm the one cap design works across tiers without
+    modification, not just for whichever tier it happened to be developed
+    against."""
+    cap = make_cap(p, "start")
+    template = make_template(p, "3-8in", tier).translate(
+        App.Vector(p["cap_w"], 0, 0))
+    return cap.fuse(template)
+
+
+def build_nameplate_coupon(p, tier="large"):
     """One template + one nameplate, pre-assembled and fused into a single
     printable test object, so the new pocket/block press fit can be
     physically verified before committing to printing full templates -
     same "print small coupons first" convention as build_post_coupon /
     build_dovetail_coupon. Drive doesn't matter (the pocket geometry is
-    identical regardless of drive), so this uses 3-8in arbitrarily.
+    identical regardless of drive), so this uses 3-8in arbitrarily. `tier`
+    doesn't matter for THIS coupon's purpose either - it's verifying the
+    pocket/block press-fit mechanism itself (size, depth, clearance),
+    which is identical for every tier (see PARAMS's tier-architecture
+    comment) - only the pocket's X-centering shifts by tier, irrelevant to
+    a press-fit test - so this defaults to "large" arbitrarily, same
+    "doesn't matter, pick one" reasoning as the drive choice. Stays a
+    single coupon regardless of the tier split (not 1-per-tier).
 
-    Uses _nameplate_block_in_pocket(p, embed=FUSE_EMBED) - the real
+    Uses _nameplate_block_in_pocket(p, tier, embed=FUSE_EMBED) - the real
     nameplate_w/h/t dimensions (no clearance reduction), positioned at its
     real seated position but with the bottom pushed FUSE_EMBED into the
     pocket floor's solid material for a genuine fuse overlap (see that
@@ -820,8 +1030,8 @@ def build_nameplate_coupon(p):
     dovetail_coupon's own dt_clearance gap - real interlock/fit is
     verified separately and rigorously by check_nameplate_fit()'s direct
     B-rep containment/collision checks, not by this fuse succeeding."""
-    template = make_template(p, "3-8in")
-    nameplate = _nameplate_block_in_pocket(p, embed=FUSE_EMBED)
+    template = make_template(p, "3-8in", tier)
+    nameplate = _nameplate_block_in_pocket(p, tier, embed=FUSE_EMBED)
     return template.fuse(nameplate)
 
 
@@ -942,14 +1152,16 @@ def watertight(shape, label):
 # Self-checks
 # --------------------------------------------------------------------------
 
-def check_post_fit(shape, p, drive):
+def check_post_fit(shape, p, drive, tier):
     """Probe the drive-square broach hole itself (nominal size, not
     undersized) onto the post. The post must NOT clear it with excess
     volume beyond the intended interference band - a probe at nominal size
-    should show measurable overlap (that's the friction grip)."""
+    should show measurable overlap (that's the friction grip). `tier`
+    only matters here to find the post's real X-center (cx varies by
+    tier) - the post's own shape/interference is drive-only."""
     af = p["drive_af_nominal"][drive]
     r = p["post_corner_r"]
-    cx, cy = _post_center(p)
+    cx, cy = _post_center(p, tier)
     half = af / 2.0 - r
     pts = [App.Vector(cx + sx * half, cy + sy * half, p["base_h"] - 1)
            for sx, sy in ((1, 1), (-1, 1), (-1, -1), (1, -1))]
@@ -977,6 +1189,18 @@ def check_structural(p):
                        % p["nameplate_t"])
     if p["base_h"] < 2.0:
         issues.append("base_h %.2fmm below 2.0mm minimum" % p["base_h"])
+    # cap_w's own minimum: the wall left behind the groove cut
+    # (cap_end's make_dovetail_groove_cutter, always at local x in
+    # [0, dt_depth]) - same 1.2mm floor as dt_wall above, since it's the
+    # same kind of "solid wall next to a cut feature" concern. cap_start's
+    # tail is a FUSE addition, not a cut, so it doesn't need this margin -
+    # only cap_end's groove does, but cap_w is shared by both sides (see
+    # make_cap), so this checks the one binding case.
+    cap_wall = p["cap_w"] - p["dt_depth"]
+    if cap_wall < 1.2:
+        issues.append("cap_w %.2fmm leaves only %.2fmm wall behind the "
+                       "dovetail groove cut (dt_depth=%.2fmm) - below "
+                       "1.2mm minimum" % (p["cap_w"], cap_wall, p["dt_depth"]))
     return issues
 
 
@@ -1030,12 +1254,15 @@ def check_cap_solid(p, side):
     return None
 
 
-def check_template_solid(p, drive):
-    """Sanity check that make_template(p, drive) produces a single, valid
-    solid - mirrors check_cap_solid's pattern (Solids count == 1 and
+def check_template_solid(p, drive, tier):
+    """Sanity check that make_template(p, drive, tier) produces a single,
+    valid solid - mirrors check_cap_solid's pattern (Solids count == 1 and
     isValid()), but applied directly to the template's own built output
     instead of relying on the caps happening to share the same
-    groove-cutter code path (see check_cap_solid's docstring).
+    groove-cutter code path (see check_cap_solid's docstring). Run for
+    every tier (not just one), since a narrower tier's base_w changing the
+    post/pocket X-centering is exactly the kind of thing that could
+    silently sever a solid if a future PARAMS change let it drift too far.
 
     This closes the same gap check_cap_solid closes for caps, but for
     templates specifically, and independently of whether
@@ -1049,33 +1276,45 @@ def check_template_solid(p, drive):
     pieces if the cutter's geometry drifts far enough - e.g. an
     unbounded _dovetail_y_offset pushing the groove band far enough
     toward the back wall to sever the base."""
-    template = make_template(p, drive)
+    template = make_template(p, drive, tier)
     n_solids = len(template.Solids)
     if n_solids != 1 or not template.isValid():
-        return ("template_%s: %d disconnected solids (expected 1), "
-                "isValid=%s" % (drive, n_solids, template.isValid()))
+        return ("template_%s_%s: %d disconnected solids (expected 1), "
+                "isValid=%s" % (tier, drive, n_solids, template.isValid()))
     return None
 
 
 def check_fuse_overlaps(p):
     """Runs check_fuse_overlap()/check_cap_solid()/check_template_solid()
     across every FUSE_EMBED-dependent boolean in the design: post/base
-    (x2 drives), piece-to-piece dovetail tail/base, both caps, each
-    drive's template (direct single-solid/validity check on the actual
+    (x2 drives x3 tiers), piece-to-piece dovetail tail/base (x3 template
+    tiers + the cap's own cap_w), both caps, every tier x drive
+    template (direct single-solid/validity check on the actual
     make_template() output), and the nameplate block's own pocket-floor
-    join (used by build_nameplate_coupon)."""
+    join (used by build_nameplate_coupon - tier-independent, see that
+    function's docstring, so checked once)."""
     issues = []
-    base_shape = make_base(p)
-    for drive in p["drives"]:
-        issue = check_fuse_overlap(base_shape, make_post(p, drive),
-                                    "post/base fuse (%s)" % drive)
+    for tier in p["tiers"]:
+        width = p["tiers"][tier]["base_w"]
+        base_shape = make_base(p, width)
+        for drive in p["drives"]:
+            issue = check_fuse_overlap(
+                base_shape, make_post(p, drive, tier),
+                "post/base fuse (%s, %s)" % (tier, drive))
+            if issue:
+                issues.append(issue)
+            issue = check_template_solid(p, drive, tier)
+            if issue:
+                issues.append(issue)
+        issue = check_fuse_overlap(base_shape, make_dovetail_tail(p, width),
+                                    "dovetail tail/base fuse (%s)" % tier)
         if issue:
             issues.append(issue)
-        issue = check_template_solid(p, drive)
-        if issue:
-            issues.append(issue)
-    issue = check_fuse_overlap(base_shape, make_dovetail_tail(p),
-                                "dovetail tail/base fuse")
+
+    cap_base = make_base(p, p["cap_w"])
+    issue = check_fuse_overlap(
+        cap_base, make_dovetail_tail(p, p["cap_w"]),
+        "dovetail tail/base fuse (cap)")
     if issue:
         issues.append(issue)
     for side in ("start", "end"):
@@ -1083,8 +1322,8 @@ def check_fuse_overlaps(p):
         if issue:
             issues.append(issue)
 
-    template = make_template(p, "3-8in")
-    embedded_block = _nameplate_block_in_pocket(p, embed=FUSE_EMBED)
+    template = make_template(p, "3-8in", "large")
+    embedded_block = _nameplate_block_in_pocket(p, "large", embed=FUSE_EMBED)
     issue = check_fuse_overlap(template, embedded_block,
                                 "nameplate block/pocket-floor fuse")
     if issue:
@@ -1092,88 +1331,113 @@ def check_fuse_overlaps(p):
     return issues
 
 
-def check_socket_od_clearance(p):
-    """Permanent regression guard for the base footprint (see PARAMS's
-    base_w/base_d comment) against the worst-case socket size,
-    SOCKET_OD_WORST_CASE_MM (36.0mm, the user's own stated figure for the
-    largest 25mm/1in socket - see that constant's comment for why it's
-    checked instead of, but cross-checked against, the two-point linear
-    estimate). The base footprint doesn't depend on drive either, so one
-    check covers both templates.
+def check_socket_od_clearance(p, tier):
+    """Tier-aware regression guard for the given tier's own base footprint
+    (see PARAMS["tiers"]) against THAT tier's own target_od - not the
+    global 36mm worst case, which only the "large" tier actually equals.
+    This is the check that proves the whole point of the tier feature:
+    each tier's own (narrower) base_w genuinely clears its own (smaller)
+    socket OD with real margin, not just the large tier's. The base
+    footprint doesn't depend on drive, so one check per tier covers both
+    templates of that tier.
 
-    Builds a real Part.makeCylinder probe of the worst-case OD, centered at
-    the post's own (cx, cy) - the same formula make_post uses - spanning
-    the full post height plus headroom, and:
+    Builds a real Part.makeCylinder probe of the tier's own target_od,
+    centered at that tier's own post (cx, cy) - the same formula make_post
+    uses - spanning the full post height plus headroom, and:
 
       1. Confirms the probe does not extend past the base's own footprint
          (cyl.cut(footprint_box).Volume == 0) - a true geometric fact, not
          an inference from BoundBox math.
       2. Confirms the probe has zero volumetric overlap with the dovetail
-         tail (protrudes outward past +X) and the dovetail groove cutter
-         (cuts into -X) - common(...).Volume == 0 for both.
+         tail (protrudes outward past +X, positioned at this tier's own
+         base_w) and the dovetail groove cutter (cuts into -X, position
+         shared/tier-independent) - common(...).Volume == 0 for both. This
+         is the live proof (not just assumed) that the shared/global
+         dovetail Y-offset - derived against the LARGE tier's own worst
+         case, see _dovetail_y_offset's docstring - really does stay clear
+         of every other (smaller, off-center) tier's own real OD probe
+         too, typically with even more margin than Large has.
       3. Computes the real clearance margin in all four directions from
          the probe's own BoundBox against the footprint edges, and asserts
          it clears OD_CLEARANCE_FLOOR.
     """
     issues = []
-    cx, cy = _post_center(p)
-    footprint = Part.makeBox(p["base_w"], p["base_d"], 500,
+    width = p["tiers"][tier]["base_w"]
+    od = p["tiers"][tier]["target_od"]
+    cx, cy = _post_center(p, tier)
+    footprint = Part.makeBox(width, p["base_d"], 500,
                               App.Vector(0, 0, -10))
-    tail = make_dovetail_tail(p)
+    tail = make_dovetail_tail(p, width)
     groove = make_dovetail_groove_cutter(p)
 
-    estimated = estimated_socket_od_mm(25.4)  # 1in SAE, cross-check only
-    od = worst_case_socket_od_mm()
     r = od / 2.0
     probe = Part.makeCylinder(r, p["post_h"] + 20,
                                App.Vector(cx, cy, p["base_h"]))
     outside = probe.cut(footprint).Volume
     if outside > 1e-6:
         issues.append(
-            "worst-case OD %.2fmm: probe extends %.2f mm3 past the base "
-            "footprint" % (od, outside))
+            "%s tier OD %.2fmm: probe extends %.2f mm3 past the base "
+            "footprint" % (tier, od, outside))
     tail_overlap = probe.common(tail).Volume
     if tail_overlap > 1e-6:
         issues.append(
-            "worst-case OD %.2fmm: probe overlaps dovetail tail by "
-            "%.4f mm3" % (od, tail_overlap))
+            "%s tier OD %.2fmm: probe overlaps dovetail tail by "
+            "%.4f mm3" % (tier, od, tail_overlap))
     groove_overlap = probe.common(groove).Volume
     if groove_overlap > 1e-6:
         issues.append(
-            "worst-case OD %.2fmm: probe overlaps dovetail groove cutter "
-            "by %.4f mm3" % (od, groove_overlap))
+            "%s tier OD %.2fmm: probe overlaps dovetail groove cutter "
+            "by %.4f mm3" % (tier, od, groove_overlap))
     left = cx - r
-    right = p["base_w"] - cx - r
+    right = width - cx - r
     front = cy - r
     back = p["base_d"] - cy - r
     margin = min(left, right, front, back)
-    print("  worst-case socket: OD %.2fmm (authoritative %.2fmm, 1in SAE "
-          "estimate %.2fmm) -> clearance margin %.2fmm "
-          "(left=%.2f right=%.2f front=%.2f back=%.2f)"
-          % (od, SOCKET_OD_WORST_CASE_MM, estimated, margin,
-             left, right, front, back))
+    print("  %s tier socket: base_w=%.2fmm target OD %.2fmm -> clearance "
+          "margin %.2fmm (left=%.2f right=%.2f front=%.2f back=%.2f)"
+          % (tier, width, od, margin, left, right, front, back))
     if margin <= OD_CLEARANCE_FLOOR:
         issues.append(
-            "worst-case OD: clearance margin %.2fmm at or below the "
-            "%.2fmm floor - base footprint too tight for this socket's "
-            "outer diameter" % (margin, OD_CLEARANCE_FLOOR))
+            "%s tier OD: clearance margin %.2fmm at or below the %.2fmm "
+            "floor - base footprint too tight for this tier's socket "
+            "outer diameter" % (tier, margin, OD_CLEARANCE_FLOOR))
     return issues
 
 
-def check_socket_nameplate_clearance(p):
+def check_socket_nameplate_clearance(p, tier="large", od=None):
     """Permanent regression guard for the actual design flaw this file's
     post/nameplate repositioning fixed: a real worst-case socket sitting on
     the post visually/physically overlapping the nameplate pocket, making
     the label unreadable while that socket is stored.
 
-    Builds the same worst-case-OD probe cylinder check_socket_od_clearance
-    builds (centered on the post's real _post_center(p), radius
-    worst_case_socket_od_mm()/2.0, spanning the post's full height plus
-    headroom above the riser top) and the real nameplate pocket cavity
-    cutter (make_nameplate_pocket_cutter - the actual cut geometry,
-    already inflated by nameplate_clearance, not the smaller raw
-    nameplate_w/h footprint), and asserts their real B-rep intersection
-    (probe.common(cavity).Volume) is exactly 0.0 - not merely small.
+    NOT re-run per-tier as a pass/fail check with a smaller od (per the
+    tier architecture - see PARAMS's comment): this check is mathematically
+    tier-INVARIANT by construction. The probe is centered at (cx, cy) and
+    the pocket cavity is X-centered at that SAME cx (both use the given
+    tier's own base_w/2 - see _post_center/_nameplate_pocket_xy), so their
+    relative X positioning - the only thing that could differ between
+    running this with tier="small" vs tier="large" - is identical
+    regardless of which tier's cx is used; only an absolute world-X
+    translation shared by both solids changes, which a volumetric overlap
+    test is invariant to. So `tier` here is cosmetic (any tier gives the
+    exact same overlap volume for the same od) - defaults to "large" to
+    match this check's own historical behaviour pre-tier-split.
+
+    `od` overrides the probe diameter for REPORTING purposes only (see
+    run(), which calls this once per tier with that tier's own real
+    target_od to print/confirm the "smaller tiers get MORE nameplate
+    clearance margin" claim numerically) - defaults to None, which uses
+    worst_case_socket_od_mm() (the real, asserted, permanent regression
+    check against the true worst case; this is the only call whose result
+    feeds an `issues` list that run() actually asserts on).
+
+    Builds the probe cylinder (centered on the post's real _post_center,
+    radius od/2.0, spanning the post's full height plus headroom above the
+    riser top) and the real nameplate pocket cavity cutter (make_
+    nameplate_pocket_cutter - the actual cut geometry, already inflated by
+    nameplate_clearance, not the smaller raw nameplate_w/h footprint), and
+    asserts their real B-rep intersection (probe.common(cavity).Volume) is
+    exactly 0.0 - not merely small.
 
     This is the direct proof the fix works: previously (post centered at
     cy=base_d/2=22.5mm), this exact same kind of probe-vs-pocket overlap
@@ -1183,29 +1447,52 @@ def check_socket_nameplate_clearance(p):
     NAMEPLATE_MARGIN_MM, growing the nameplate, or hand-editing cy back to
     a fixed centering) trips this check immediately."""
     issues = []
-    cx, cy = _post_center(p)
-    r = worst_case_socket_od_mm() / 2.0
+    cx, cy = _post_center(p, tier)
+    r = (od if od is not None else worst_case_socket_od_mm()) / 2.0
     probe = Part.makeCylinder(r, p["post_h"] + 20,
                                App.Vector(cx, cy, p["base_h"]))
-    cavity = make_nameplate_pocket_cutter(p)
+    cavity = make_nameplate_pocket_cutter(p, tier)
     overlap = probe.common(cavity).Volume
-    print("  worst-case socket probe (OD %.2fmm) vs nameplate pocket "
-          "cavity: overlap = %.6f mm3 (must be ~0)" % (r * 2, overlap))
+    print("  socket probe (OD %.2fmm, tier=%s) vs nameplate pocket "
+          "cavity: overlap = %.6f mm3 (must be ~0)" % (r * 2, tier, overlap))
     # >1e-6, not >0.0 - matches every other "must not overlap" check in this
     # file (check_socket_od_clearance, check_nameplate_fit): a near-tangent
     # OCC boolean can return a tiny spurious nonzero volume even when two
     # solids don't really overlap, so a bare >0.0 risks a flaky failure if
     # this gap is ever narrowed. Today's real gap is 2.25mm (NAMEPLATE_
-    # MARGIN_MM), nowhere near this floor - verified live, not tangency.
+    # MARGIN_MM) at the true worst case, nowhere near this floor - verified
+    # live, not tangency.
     if overlap > 1e-6:
         issues.append(
-            "worst-case socket probe overlaps the nameplate pocket cavity "
-            "by %.6f mm3 - a large socket resting on the post would sit "
-            "on top of the nameplate" % overlap)
+            "socket probe (OD %.2fmm) overlaps the nameplate pocket cavity "
+            "by %.6f mm3 - a socket resting on the post would sit on top "
+            "of the nameplate" % (r * 2, overlap))
     return issues
 
 
-def check_nameplate_fit(p):
+def _nameplate_socket_margin_mm(p, tier, od):
+    """Real Y-gap (mm) between the nameplate pocket cavity's back edge and
+    a socket probe of diameter `od`'s frontmost reach (cy - od/2), both
+    built from real B-rep geometry (make_nameplate_pocket_cutter's actual
+    BoundBox, not the arithmetic _post_cy's derivation used). Purely
+    informational/reporting - used by run() to print and confirm, with
+    real numbers, that a tier's own (smaller) target_od socket clears the
+    shared nameplate pocket by MORE margin than the large tier's 36mm
+    worst case does (which is exactly NAMEPLATE_MARGIN_MM=2.25mm by
+    construction, since _post_cy solves cy at the minimum that satisfies
+    that margin for the worst case). This does NOT replace or duplicate
+    check_socket_nameplate_clearance's own pass/fail overlap assertion
+    (which stays tier-invariant / runs once against the true worst case,
+    see that function's docstring) - it's a separate, unasserted
+    measurement for the report only."""
+    cx, cy = _post_center(p, tier)
+    cavity = make_nameplate_pocket_cutter(p, tier)
+    pocket_back = cavity.BoundBox.YMax
+    probe_front = cy - od / 2.0
+    return probe_front - pocket_back
+
+
+def check_nameplate_fit(p, tier):
     """Direct B-rep verification of the top-of-base pocket/block nameplate
     mechanism - same "build real geometry, verify with real booleans"
     discipline as check_fuse_overlap/check_cap_solid, replacing the old
@@ -1238,63 +1525,79 @@ def check_nameplate_fit(p):
          PARAMS change can't silently cut the pocket through the whole
          riser without this check catching it - written generally (as a
          formula, not a hardcoded pass) so it stays meaningful if base_h
-         or nameplate_t change later.
+         or nameplate_t change later. Tier-independent (base_h/nameplate_t
+         never vary by tier), so this part of the result is the same
+         number for every tier - kept inside the per-tier loop anyway for
+         simplicity/uniformity, not because it can differ.
+
+    `tier` matters here because the pocket's own X-centering (FOOTPRINT)
+    and its collision-check partners (that tier's own post, positioned at
+    that tier's own cx) both depend on it - unlike check_socket_nameplate_
+    clearance's Y-only overlap test (which is genuinely tier-invariant,
+    see that function's docstring), this footprint/collision check is
+    NOT invariant across tiers (a narrower tier's base_w could plausibly
+    leave less footprint margin) and must be run once per tier - see
+    run(), which does exactly that and is what surfaced the shared
+    nameplate-pocket-size floor on base_w discussed in PARAMS's tier
+    comment.
     """
     issues = []
-    cavity = make_nameplate_pocket_cutter(p)
-    block = _nameplate_block_in_pocket(p, embed=0.0)
+    width = p["tiers"][tier]["base_w"]
+    cavity = make_nameplate_pocket_cutter(p, tier)
+    block = _nameplate_block_in_pocket(p, tier, embed=0.0)
 
     block_vol = block.Volume
     contained_vol = block.common(cavity).Volume
     frac = contained_vol / block_vol if block_vol > 0 else 0.0
-    print("  nameplate block/pocket containment: %.4f of %.4f mm3 block "
-          "volume (%.1f%%)" % (contained_vol, block_vol, frac * 100))
+    print("  [%s] nameplate block/pocket containment: %.4f of %.4f mm3 "
+          "block volume (%.1f%%)" % (tier, contained_vol, block_vol,
+                                      frac * 100))
     if frac < 0.999:
         issues.append(
-            "nameplate block only %.1f%% contained in the pocket cavity "
-            "(expected ~100%% - a plain press fit with no FUSE_EMBED baked "
-            "into the seated position) - pocket/block geometry likely "
-            "misaligned" % (frac * 100))
+            "%s tier: nameplate block only %.1f%% contained in the pocket "
+            "cavity (expected ~100%% - a plain press fit with no "
+            "FUSE_EMBED baked into the seated position) - pocket/block "
+            "geometry likely misaligned" % (tier, frac * 100))
 
     for drive in p["drives"]:
-        post_overlap = cavity.common(make_post(p, drive)).Volume
+        post_overlap = cavity.common(make_post(p, drive, tier)).Volume
         if post_overlap > 1e-6:
             issues.append(
-                "nameplate pocket overlaps the %s post by %.4f mm3"
-                % (drive, post_overlap))
+                "%s tier: nameplate pocket overlaps the %s post by "
+                "%.4f mm3" % (tier, drive, post_overlap))
 
-    tail_overlap = cavity.common(make_dovetail_tail(p)).Volume
+    tail_overlap = cavity.common(make_dovetail_tail(p, width)).Volume
     if tail_overlap > 1e-6:
         issues.append(
-            "nameplate pocket overlaps the piece-to-piece dovetail tail by "
-            "%.4f mm3" % tail_overlap)
+            "%s tier: nameplate pocket overlaps the piece-to-piece "
+            "dovetail tail by %.4f mm3" % (tier, tail_overlap))
     groove_overlap = cavity.common(make_dovetail_groove_cutter(p)).Volume
     if groove_overlap > 1e-6:
         issues.append(
-            "nameplate pocket overlaps the piece-to-piece dovetail groove "
-            "cutter by %.4f mm3" % groove_overlap)
+            "%s tier: nameplate pocket overlaps the piece-to-piece "
+            "dovetail groove cutter by %.4f mm3" % (tier, groove_overlap))
 
     bb = cavity.BoundBox
     margin_left = bb.XMin
-    margin_right = p["base_w"] - bb.XMax
+    margin_right = width - bb.XMax
     margin_front = bb.YMin
-    print("  nameplate pocket footprint: X[%.2f,%.2f] Y[%.2f,%.2f] within "
-          "base_w=%.1f base_d=%.1f -> margin left=%.2f right=%.2f "
-          "front=%.2f" % (bb.XMin, bb.XMax, bb.YMin, bb.YMax, p["base_w"],
+    print("  [%s] nameplate pocket footprint: X[%.2f,%.2f] Y[%.2f,%.2f] "
+          "within base_w=%.1f base_d=%.1f -> margin left=%.2f right=%.2f "
+          "front=%.2f" % (tier, bb.XMin, bb.XMax, bb.YMin, bb.YMax, width,
                            p["base_d"], margin_left, margin_right,
                            margin_front))
     if min(margin_left, margin_right, margin_front) < 2.0:
         issues.append(
-            "nameplate pocket footprint margin too tight: left=%.2f "
-            "right=%.2f front=%.2f (expected >=2.0mm on each)"
-            % (margin_left, margin_right, margin_front))
+            "%s tier: nameplate pocket footprint margin too tight: "
+            "left=%.2f right=%.2f front=%.2f (expected >=2.0mm on each)"
+            % (tier, margin_left, margin_right, margin_front))
 
     floor = p["base_h"] - p["nameplate_t"]
-    print("  nameplate pocket floor thickness: %.2fmm" % floor)
+    print("  [%s] nameplate pocket floor thickness: %.2fmm" % (tier, floor))
     if floor < 2.0:
         issues.append(
-            "nameplate pocket floor %.2fmm below 2.0mm minimum - pocket "
-            "cuts too close through the riser" % floor)
+            "%s tier: nameplate pocket floor %.2fmm below 2.0mm minimum - "
+            "pocket cuts too close through the riser" % (tier, floor))
 
     return issues
 
@@ -1349,10 +1652,14 @@ def export_all(shapes, out_dir, formats=("step", "stl", "3mf")):
 def run():
     doc = App.newDocument("socket_organizer")
     pieces = generate_all(PARAMS)
-    print("generated %d pieces (expected 5)" % len(pieces))
-    assert len(pieces) == 5
-    assert set(pieces) == {"template_3-8in", "template_1-2in",
-                            "cap_start", "cap_end", "nameplate_template"}
+    print("generated %d pieces (expected 9)" % len(pieces))
+    assert len(pieces) == 9
+    expected_names = set()
+    for tier in PARAMS["tiers"]:
+        for drive in PARAMS["drives"]:
+            expected_names.add("template_%s_%s" % (tier, drive))
+    expected_names |= {"cap_start", "cap_end", "nameplate_template"}
+    assert set(pieces) == expected_names
 
     print("\n--- self-check report ---")
     struct_issues = check_structural(PARAMS)
@@ -1366,36 +1673,49 @@ def run():
             print("FUSE-OVERLAP: %s" % issue)
     else:
         print("all FUSE_EMBED-dependent fuses have genuine volumetric "
-              "overlap (post/base x%d drives, dovetail tail/base, "
-              "both caps and both drives' templates are single valid "
-              "solids, nameplate block/pocket-floor)" % len(PARAMS["drives"]))
+              "overlap (post/base x%d drives x%d tiers, dovetail "
+              "tail/base per tier + cap, both caps and every tier x "
+              "drive template are single valid solids, nameplate "
+              "block/pocket-floor)"
+              % (len(PARAMS["drives"]), len(PARAMS["tiers"])))
 
-    print("\n--- nameplate pocket/block fit self-check "
+    print("\n--- nameplate pocket/block fit self-check, per tier "
           "(real B-rep containment/collision/footprint/floor) ---")
-    nameplate_fit_issues = check_nameplate_fit(PARAMS)
+    nameplate_fit_issues = []
+    for tier in PARAMS["tiers"]:
+        nameplate_fit_issues.extend(check_nameplate_fit(PARAMS, tier))
     if nameplate_fit_issues:
         for issue in nameplate_fit_issues:
             print("NAMEPLATE-FIT: %s" % issue)
     else:
-        print("nameplate block is essentially fully contained in the "
-              "template's pocket cavity, the pocket collides with neither "
-              "post nor the piece-to-piece dovetail, the pocket stays "
-              "within the template's footprint with real margin, and the "
-              "floor left below the pocket clears the minimum thickness")
+        print("for every tier, the nameplate block is essentially fully "
+              "contained in that tier's pocket cavity, the pocket "
+              "collides with neither post nor the piece-to-piece "
+              "dovetail, the pocket stays within that tier's own "
+              "footprint with real margin, and the floor left below the "
+              "pocket clears the minimum thickness")
 
-    print("\n--- socket OD clearance self-check "
-          "(real cylinder probe, worst-case OD) ---")
-    od_clearance_issues = check_socket_od_clearance(PARAMS)
+    print("\n--- socket OD clearance self-check, per tier "
+          "(real cylinder probe, each tier's own target_od) ---")
+    od_clearance_issues = []
+    for tier in PARAMS["tiers"]:
+        od_clearance_issues.extend(check_socket_od_clearance(PARAMS, tier))
     if od_clearance_issues:
         for issue in od_clearance_issues:
             print("OD-CLEARANCE: %s" % issue)
     else:
-        print("the worst-case estimated socket OD clears the base "
-              "footprint (and stays clear of the dovetail tail/groove) by "
-              "more than the %.2fmm floor" % OD_CLEARANCE_FLOOR)
+        print("every tier's own target-OD socket clears that tier's own "
+              "base footprint (and stays clear of the shared dovetail "
+              "tail/groove) by more than the %.2fmm floor"
+              % OD_CLEARANCE_FLOOR)
 
     print("\n--- socket/nameplate overlap self-check "
           "(real cylinder probe vs real pocket cavity, direct B-rep) ---")
+    # The actual, asserted regression check: tier-invariant by
+    # construction (see check_socket_nameplate_clearance's docstring), so
+    # this runs exactly ONCE against the true worst case - NOT once per
+    # tier - per PARAMS's tier-architecture comment ("don't re-run per
+    # tier with a smaller target").
     socket_nameplate_issues = check_socket_nameplate_clearance(PARAMS)
     if socket_nameplate_issues:
         for issue in socket_nameplate_issues:
@@ -1404,6 +1724,18 @@ def run():
         print("the worst-case socket probe and the nameplate pocket cavity "
               "have exactly zero volumetric overlap - a large socket "
               "resting on the post can no longer sit on top of the label")
+
+    # Informational only (not asserted): confirm, with real per-tier
+    # numbers, that a tier's own (smaller) target_od socket clears the
+    # shared nameplate pocket by MORE margin than the large tier's binding
+    # 36mm worst case does - see _nameplate_socket_margin_mm's docstring.
+    print("\n--- nameplate/socket margin by tier (informational, confirms "
+          "smaller tiers get MORE clearance, not a new pass/fail check) ---")
+    for tier in PARAMS["tiers"]:
+        od = PARAMS["tiers"][tier]["target_od"]
+        margin = _nameplate_socket_margin_mm(PARAMS, tier, od)
+        print("  [%s] target_od=%.2fmm -> pocket-to-socket Y margin = "
+              "%.3fmm" % (tier, od, margin))
 
     printability_issues = []
     mesh_issues = []
@@ -1418,10 +1750,14 @@ def run():
             mesh_issues.append(report)
 
     # Fit check: friction interference differs by drive (af_nominal 9.53mm
-    # vs 12.70mm with the same 0.5mm undersize applied to both).
+    # vs 12.70mm with the same 0.5mm undersize applied to both) but not by
+    # tier (post geometry is tier-independent) - checked once per drive,
+    # against the "large" tier's template (matches every other tier's post
+    # shape/interference exactly, only cx differs and that's already
+    # exercised by check_post_fit's own _post_center(p, tier) lookup).
     for drive in PARAMS["drives"]:
-        name = "template_%s" % drive
-        overlap = check_post_fit(pieces[name], PARAMS, drive)
+        name = "template_large_%s" % drive
+        overlap = check_post_fit(pieces[name], PARAMS, drive, "large")
         print("post fit probe overlap (%s, drive %s): %.2f mm3"
               % (name, drive, overlap))
         assert overlap > 0.5, (
@@ -1439,14 +1775,41 @@ def run():
     assert not printability_issues, "printability check failed, see report above"
     assert not mesh_issues, "mesh/watertight check failed, see report above"
 
-    coupon = build_dovetail_coupon(PARAMS)
-    # NOTE: this only proves the two halves fuse into one watertight solid
-    # (i.e. the flat base walls touch with no gap). It does NOT verify the
-    # dovetail tail/groove actually interlock; don't treat this as
-    # dovetail-fit proof, that needs eyeballing the coupon geometry or a
-    # real print.
-    assert len(coupon.Solids) == 1, "dovetail coupon halves did not fuse into one piece"
-    print("dovetail coupon: 1 solid, volume %.1f mm3" % coupon.Volume)
+    # Dovetail interlock coupons: (a) same-tier regression (large+large,
+    # unchanged from before the tier split), (b) cross-tier (small+
+    # medium) - the direct new proof that the shared/global dovetail
+    # Y-offset really does let different-width tiers interlock, and (c)
+    # cap+template against 2 different tiers - the direct new proof that
+    # one shrunk cap design interlocks with every tier without
+    # modification. NOTE: these only prove the halves fuse into one
+    # watertight solid (i.e. the flat base walls/tail-root touch with no
+    # gap) - they do NOT verify the dovetail tail/groove actually
+    # interlock; don't treat this as dovetail-fit proof, that needs
+    # eyeballing the coupon geometry or a real print.
+    dovetail_coupon = build_dovetail_coupon(PARAMS, "large")
+    assert len(dovetail_coupon.Solids) == 1, (
+        "dovetail coupon (same-tier, large+large) halves did not fuse "
+        "into one piece")
+    print("dovetail coupon (large+large, regression): 1 solid, "
+          "volume %.1f mm3" % dovetail_coupon.Volume)
+
+    cross_tier_coupon = build_dovetail_cross_tier_coupon(PARAMS, "small",
+                                                           "medium")
+    assert len(cross_tier_coupon.Solids) == 1, (
+        "dovetail cross-tier coupon (small+medium) halves did not fuse "
+        "into one piece")
+    print("dovetail coupon (small+medium, cross-tier): 1 solid, "
+          "volume %.1f mm3" % cross_tier_coupon.Volume)
+
+    cap_coupons = {}
+    for tier in ("small", "medium"):
+        coupon = build_cap_template_coupon(PARAMS, tier)
+        assert len(coupon.Solids) == 1, (
+            "cap/template coupon (cap+%s) halves did not fuse into one "
+            "piece" % tier)
+        print("cap/template coupon (cap+%s): 1 solid, volume %.1f mm3"
+              % (tier, coupon.Volume))
+        cap_coupons["cap_coupon_%s" % tier] = coupon
 
     out_dir = os.path.join(_script_dir(), "exports")
     export_failures = list(export_all(pieces, out_dir))
@@ -1454,9 +1817,11 @@ def run():
     coupons = {
         "post_coupon_3-8in": build_post_coupon(PARAMS, "3-8in"),
         "post_coupon_1-2in": build_post_coupon(PARAMS, "1-2in"),
-        "dovetail_coupon": coupon,
+        "dovetail_coupon": dovetail_coupon,
+        "dovetail_coupon_cross_tier": cross_tier_coupon,
         "nameplate_coupon": build_nameplate_coupon(PARAMS),
     }
+    coupons.update(cap_coupons)
     export_failures.extend(export_all(coupons, out_dir))
 
     print("\nExported %d pieces + %d coupons to %s"
