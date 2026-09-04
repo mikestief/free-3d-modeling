@@ -90,6 +90,17 @@ PARAMS = {
     # live B-rep proof that the pocket and the worst-case socket probe now
     # have exactly zero overlap.
     #
+    # base_d's own back-wall clearance (the "+2.25" in the formula above)
+    # is NOT re-derived/enforced from NAMEPLATE_MARGIN_MM at runtime - it's
+    # a hand-computed literal baked into this number. What actually gets
+    # asserted is check_socket_od_clearance's generic back-margin check
+    # against the looser OD_CLEARANCE_FLOOR (1.5mm), not this 2.25mm value
+    # specifically. So a future change to NAMEPLATE_MARGIN_MM/nameplate_h/
+    # the worst-case OD will correctly move cy and fail loudly if base_d
+    # wasn't updated to match (same as it did once already for cap_round_r,
+    # see d57e511) - but base_d itself still needs a human to recompute it
+    # from the formula above, this isn't closed-loop/self-adjusting.
+    #
     # Both the socket-OD clearance (check_socket_od_clearance) and the
     # pocket/post placement (check_nameplate_fit) are verified live against
     # these dimensions via real B-rep booleans, not assumed from this
@@ -1179,8 +1190,14 @@ def check_socket_nameplate_clearance(p):
     cavity = make_nameplate_pocket_cutter(p)
     overlap = probe.common(cavity).Volume
     print("  worst-case socket probe (OD %.2fmm) vs nameplate pocket "
-          "cavity: overlap = %.6f mm3 (must be exactly 0)" % (r * 2, overlap))
-    if overlap > 0.0:
+          "cavity: overlap = %.6f mm3 (must be ~0)" % (r * 2, overlap))
+    # >1e-6, not >0.0 - matches every other "must not overlap" check in this
+    # file (check_socket_od_clearance, check_nameplate_fit): a near-tangent
+    # OCC boolean can return a tiny spurious nonzero volume even when two
+    # solids don't really overlap, so a bare >0.0 risks a flaky failure if
+    # this gap is ever narrowed. Today's real gap is 2.25mm (NAMEPLATE_
+    # MARGIN_MM), nowhere near this floor - verified live, not tangency.
+    if overlap > 1e-6:
         issues.append(
             "worst-case socket probe overlaps the nameplate pocket cavity "
             "by %.6f mm3 - a large socket resting on the post would sit "
