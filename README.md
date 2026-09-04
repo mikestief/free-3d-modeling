@@ -19,7 +19,7 @@ needed and nothing owed.
 |---|---|---|---|---|
 | **[Whiteboard Caddy](whiteboard-stand/)** | Classroom desk caddy for lap whiteboards, markers and erasers | 244 × 159 × 94 mm | 7–12 h · ~350 g PETG · no supports | ✅ Printed and in use |
 | **[Whiteboard Caddy (3-eraser)](whiteboard-stand-3-eraser/)** | Variant with a third eraser bay and no carry handle | 244 × 159 × 94 mm | 7–12 h · ~380 g PETG · no supports | 🧪 Generated and checked, not yet printed |
-| **[Socket Organizer](socket-organizer/)** | Modular, interlinking socket holder, metric and SAE, 3/8" and 1/2" drive — 3 width tiers × 2 drives of size-agnostic templates + 2 shrunk caps + 1 blank nameplate, unlimited sizes labeled with your own slicer's text tool | 30–40 × 51 × 26 mm per template, tier-dependent (9 piece types total) | ~10–25 min/template · few g/piece · no supports | 🧪 Generated and checked, not yet printed |
+| **[Socket Organizer](socket-organizer/)** | Modular, interlinking socket holder, metric and SAE, 3/8" and 1/2" drive — 3 width tiers × 2 drives of size-agnostic templates + 2 shrunk caps + 1 blank nameplate, unlimited sizes labeled with your own slicer's text tool | 30–40 × 51 × 19 mm per template, tier-dependent (9 piece types total) | ~10–25 min/template · few g/piece · no supports | 🧪 Generated and checked, not yet printed |
 
 ---
 

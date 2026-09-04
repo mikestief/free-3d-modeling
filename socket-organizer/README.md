@@ -11,7 +11,7 @@ neighbors, so you build out exactly the sockets you own.
 
 | | |
 |---|---|
-| Size | 3 width tiers (small/medium/large — see table below) × 51 × 26 mm per template (base + post, before the socket itself); end caps are narrower, 12 × 51 × 15 mm |
+| Size | 3 width tiers (small/medium/large — see table below) × 51 × 19 mm per template (base + post, before the socket itself); end caps are narrower, 12 × 51 × 8 mm |
 | Print time | Small parts — roughly 10–25 min per template depending on tier, a couple minutes per cap or nameplate; several print easily on one plate |
 | Material | A few grams per piece in PLA or PETG |
 | Supports | None |

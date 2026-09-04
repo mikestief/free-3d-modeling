@@ -182,7 +182,34 @@ PARAMS = {
         "large":  {"base_w": 40.0, "target_od": 36.0},  # 20-25mm sockets
     },
     "base_d":         51.0,   # front-to-back depth
-    "base_h":         15.0,   # riser height before the post/socket area
+    # base_h shrunk from 15.0 to 8.0 (material-reduction pass) - the prior
+    # 15.0 grew from an original 10.0 (see the big block comment above)
+    # purely to leave floor material under the nameplate pocket
+    # (nameplate_t=4.0mm deep), and left base_h - nameplate_t = 11.0mm of
+    # floor - far beyond what either self-check actually requires there.
+    # Two different checks bound this floor, and they're NOT the same
+    # number: check_structural only asserts base_h itself >= 2.0mm (a
+    # generic non-floor-specific floor, same class as its dt_wall/cap_wall
+    # checks); the real floor-thickness guard is check_nameplate_fit's
+    # FLOOR check, which asserts (base_h - nameplate_t) >= 2.0mm. At
+    # nameplate_t=4.0, that puts the true minimum at base_h=6.0mm.
+    # 8.0mm was chosen to land at floor=4.0mm - exactly 2x check_
+    # nameplate_fit's 2.0mm minimum, not just barely over it - because
+    # this floor takes repeated press-fit insertion/removal stress from
+    # swapping nameplates (cyclic load), not just static weight, so a bare
+    # code-minimum floor would be the wrong bar. 4.0mm floor sits at the
+    # upper end of the ~3-4mm leaner-but-real target this pass aimed for.
+    # post_h (11.0, PARAMS below) and the post's drive-square engagement
+    # depth are UNCHANGED and out of scope - those are load-bearing for
+    # socket friction-fit, a separate concern from this floor. The piece-
+    # to-piece dovetail tail/groove (make_dovetail_tail/make_dovetail_
+    # groove_cutter) extrude the full base_h in Z, so this also shortens
+    # the dovetail's vertical engagement from 15mm to 8mm - still 2x the
+    # connector's own 4mm dt_depth/dt_neck_w profile, re-verified live via
+    # check_fuse_overlaps (tail/base overlap), check_template_solid
+    # (single-solid templates) and the dovetail/cross-tier/cap coupons -
+    # see run()'s report for the actual numbers at this height.
+    "base_h":          8.0,   # riser height before the post/socket area
 
     # --- end cap footprint (shrunk vs. any template tier - see make_cap) --
     # A cap carries no post and no nameplate pocket, only the dovetail
