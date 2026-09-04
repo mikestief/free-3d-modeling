@@ -11,7 +11,7 @@ neighbors, so you build out exactly the sockets you own.
 
 | | |
 |---|---|
-| Size | 40 × 45 × 26 mm per template (base + post, before the socket itself) |
+| Size | 40 × 51 × 26 mm per template (base + post, before the socket itself) |
 | Print time | Small parts — roughly 15–25 min per template on a typical FDM printer, a couple minutes per nameplate; several print easily on one plate |
 | Material | A few grams per piece in PLA or PETG |
 | Supports | None |
@@ -35,7 +35,12 @@ The whole system is now exactly 5 piece types:
   drive-specific, with the usual piece-to-piece dovetail for joining into
   a row. No text baked into the geometry anywhere. Instead, a plain
   rectangular pocket is inset into the TOP of the riser, in front of the
-  post, for a nameplate to press straight down into.
+  post, for a nameplate to press straight down into. The post sits toward
+  the back of the base (not centered front-to-back) so that even the
+  largest socket this holder supports — a real ~36mm OD, worst case —
+  never covers the nameplate pocket while it's sitting on the post;
+  earlier revisions centered the post and let a big socket's own
+  footprint reach over the label.
 - **`cap_start`** / **`cap_end`** — unchanged row-end pieces. Always were
   blank, still are.
 - **`nameplate_template`** — a single small blank rectangular block that

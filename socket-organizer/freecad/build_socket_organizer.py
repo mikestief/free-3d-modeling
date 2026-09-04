@@ -60,13 +60,35 @@ PARAMS = {
     # inset pocket instead (see make_nameplate_pocket_cutter) - which also
     # removes the sloped wall entirely (it only ever existed to angle the
     # wall-mounted label for visibility, see make_base). With no more
-    # front-wall label zone to reserve room for, the post recenters from
+    # front-wall label zone to reserve room for, the post recentered from
     # (base_w/2, base_d*0.62) to (base_w/2, base_d/2) (see make_post), and
-    # the footprint shrinks to base_w=40.0/base_d=45.0. base_h grows from
+    # the footprint shrank to base_w=40.0/base_d=45.0. base_h grew from
     # 10.0 to 15.0 to leave real floor material (base_h - nameplate_t)
     # under the new pocket - see check_nameplate_fit's floor-thickness
     # check and check_structural. post_h (11.0) is unaffected by any of
     # this - it's purely about drive-square engagement depth.
+    #
+    # That cy=base_d/2 centering was then found to be a real design flaw,
+    # live: the worst-case socket (worst_case_socket_od_mm()=36.0mm OD,
+    # r=18.0mm) sitting on a post centered at cy=22.5mm has a circular
+    # footprint reaching forward to Y=4.5mm - INSIDE the nameplate pocket's
+    # own Y-span at the time (~Y=[4.38,12.38]) - so a large socket resting
+    # on the post would sit on top of / over the nameplate, making the
+    # label unreadable. Fixed by back-biasing the post: cy is now derived
+    # by _post_cy(p) (NOT a fixed base_d/2 or other constant - it's solved
+    # from worst_case_socket_od_mm(), nameplate_h/nameplate_clearance, and
+    # NAMEPLATE_MARGIN_MM so it can't silently drift out of sync with any
+    # of those), which works out to cy=30.75mm at the current PARAMS.
+    # base_d grew from 45.0 to 51.0 (base_w stays 40.0 - it's sized off
+    # the socket OD in X, which this change doesn't touch, re-verified
+    # live via check_socket_od_clearance's left/right margins, unchanged
+    # at 2.0mm each) so the back-biased worst-case-OD probe still clears
+    # the back wall by NAMEPLATE_MARGIN_MM (2.25mm) of real margin:
+    # base_d = cy + r + NAMEPLATE_MARGIN_MM = 30.75 + 18.0 + 2.25 = 51.0.
+    # See NAMEPLATE_MARGIN_MM's own comment and _post_cy's docstring for
+    # the full derivation, and check_socket_nameplate_clearance() for the
+    # live B-rep proof that the pocket and the worst-case socket probe now
+    # have exactly zero overlap.
     #
     # Both the socket-OD clearance (check_socket_od_clearance) and the
     # pocket/post placement (check_nameplate_fit) are verified live against
@@ -74,7 +96,7 @@ PARAMS = {
     # comment - see those functions' own docstrings/prints for the actual
     # measured numbers.
     "base_w":         40.0,   # left-right, this is the row-direction pitch
-    "base_d":         45.0,   # front-to-back depth
+    "base_d":         51.0,   # front-to-back depth
     "base_h":         15.0,   # riser height before the post/socket area
 
     # --- post (drive-square friction mount) ---------------------------------
@@ -232,6 +254,35 @@ OD_CLEARANCE_FLOOR = 1.5
 # "close enough".
 DOVETAIL_Y_OFFSET_HEADROOM_MM = 1.0
 
+# Real, guaranteed-non-tangent margin (mm) used to back-bias the post away
+# from the nameplate pocket. Discovered live: with the post centered at
+# cy=base_d/2 (22.5mm at the old base_d=45.0), the worst-case-OD socket
+# probe's own circular footprint (r=worst_case_socket_od_mm()/2=18.0mm,
+# centered on the post) reached all the way to Y=cy-r=4.5mm - INSIDE the
+# nameplate pocket's own Y-span (pocket sat at roughly Y=[4.38,12.38] under
+# the old post-relative placement, see _nameplate_pocket_xy's prior
+# docstring in git history) - so a real worst-case socket resting on the
+# post would sit on top of / over the nameplate, making the label
+# unreadable while that socket is stored. The fix isn't a tighter
+# clearance number on the same layout - it's a real reserved Y-band, sized
+# by this margin, that the pocket and the socket's circular footprint
+# never share.
+#
+# Used three times (see _post_cy and _nameplate_pocket_xy), each a
+# distinct real-world gap: (a) nameplate pocket cavity's front edge to the
+# front wall (Y=0), (b) pocket cavity's back edge to the worst-case
+# socket's frontmost reach (cy-r) - this is the one that actually
+# guarantees the fix, see _post_cy's docstring - and (c) the socket's
+# backmost reach (cy+r) to the back wall (Y=base_d). Same "few tenths of
+# FDM tolerance, times several, plus real model uncertainty" reasoning as
+# OD_CLEARANCE_FLOOR (1.5mm), but picked a bit above OD_CLEARANCE_FLOOR's
+# own value and specifically above check_nameplate_fit's own hardcoded
+# 2.0mm footprint-margin floor (see that function) so margin (a) alone
+# doesn't sit exactly ON that check's boundary - 2.25mm keeps real slack
+# above it rather than an exact tie that would be one float rounding away
+# from a spurious failure.
+NAMEPLATE_MARGIN_MM = 2.25
+
 
 def estimated_socket_od_mm(nominal_mm):
     """Linear estimate of a socket's outer diameter (mm) from its nominal
@@ -291,15 +342,72 @@ def make_base(p):
     return box(p["base_w"], p["base_d"], p["base_h"], 0, 0, 0)
 
 
+def _post_cy(p):
+    """Minimum Y for the post's centerline that GUARANTEES the worst-case
+    socket's own circular footprint (r=worst_case_socket_od_mm()/2.0,
+    centered on the post - the same probe check_socket_od_clearance and
+    the nameplate-clearance check below both build for real) never shares
+    any Y with the nameplate pocket's cavity, with real margin on both
+    sides of the boundary - not the old cy=base_d/2 centering, which was
+    proven live to let a worst-case socket's footprint reach all the way
+    into the pocket (see NAMEPLATE_MARGIN_MM's docstring for the discovery
+    and the actual old numbers).
+
+    Derivation, front to back:
+
+      1. The pocket cavity (nameplate_w/h plus nameplate_clearance per
+         side - the real cut geometry, not the raw nameplate_h PARAM) sits
+         with its front edge NAMEPLATE_MARGIN_MM behind the front wall
+         (Y=0) - see _nameplate_pocket_xy, which places the pocket using
+         this exact same margin so the two stay consistent by
+         construction.
+      2. The pocket cavity's back edge is therefore at
+         NAMEPLATE_MARGIN_MM + cavity_h.
+      3. The socket probe's frontmost reach (cy - r) must sit at least
+         another NAMEPLATE_MARGIN_MM behind THAT, so the gap between the
+         pocket and the probe is a real, measured margin - not a
+         zero-gap tangent touch that would technically read as "no
+         overlap" but leave no actual room for FDM tolerance or model
+         uncertainty.
+
+    So: cy = (NAMEPLATE_MARGIN_MM + cavity_h) + NAMEPLATE_MARGIN_MM + r.
+
+    This is the MINIMUM cy satisfying the guarantee - used directly (not
+    padded further) as PARAMS["base_d"] is sized, in turn, to leave
+    NAMEPLATE_MARGIN_MM of its own real clearance behind the resulting
+    probe (see PARAMS's base_d comment), so growing cy past this minimum
+    would just eat into that back-wall margin for no benefit.
+
+    Verified live by check_socket_nameplate_clearance() and check_
+    nameplate_fit() - both build the real pocket cutter and/or probe
+    geometry and assert a real B-rep boolean overlap of exactly 0, not
+    inferred from this arithmetic alone."""
+    r = worst_case_socket_od_mm() / 2.0
+    cavity_h = p["nameplate_h"] + 2 * p["nameplate_clearance"]
+    pocket_y1 = NAMEPLATE_MARGIN_MM + cavity_h
+    return pocket_y1 + NAMEPLATE_MARGIN_MM + r
+
+
+def _post_center(p):
+    """(cx, cy) for the post's centerline on the riser's top footprint -
+    single source of truth used by every function that places or probes
+    the post, the piece-to-piece dovetail's Y-offset, and the nameplate
+    pocket, so none of them can silently drift apart. cx stays a simple
+    base_w/2 centering (the post's X placement has nothing to do with the
+    nameplate - only base_w, which is sized off the socket OD in X, drives
+    it); cy is back-biased away from the nameplate pocket, see
+    _post_cy."""
+    return p["base_w"] / 2.0, _post_cy(p)
+
+
 def make_post(p, drive):
     """Square post, corners rounded, sized to the drive square (undersized
-    for friction). Centered in both X and Y on the riser's top footprint.
-
-    Centered in Y (base_d/2) rather than back-biased (the old base_d*0.62)
-    now that there's no sloped-wall label zone at the front to leave room
-    for - the nameplate moved to a top-of-base pocket in front of the post
-    instead (see make_nameplate_pocket_cutter), which is exactly what
-    recentering makes room for.
+    for friction). Centered in X on the riser's top footprint, back-biased
+    in Y (see _post_center/_post_cy) so the worst-case socket's own
+    circular footprint clears the nameplate pocket with real margin,
+    rather than the old cy=base_d/2 centering (proven live to let a
+    worst-case socket's footprint reach into the pocket - see
+    NAMEPLATE_MARGIN_MM's docstring).
 
     The bottom face is pushed FUSE_EMBED below z=0 (extending the extrusion
     height to compensate, so the top - where post_top_chamfer's edge lookup
@@ -314,7 +422,7 @@ def make_post(p, drive):
     "Fuse-overlap self-checks"), which needs no mesh at all."""
     af = p["drive_af_nominal"][drive] - p["post_af_undersize"]
     r = p["post_corner_r"]
-    cx, cy = p["base_w"] / 2.0, p["base_d"] / 2.0
+    cx, cy = _post_center(p)
     half = af / 2.0 - r
     pts = []
     for sx, sy in ((1, 1), (-1, 1), (-1, -1), (1, -1)):
@@ -416,9 +524,18 @@ def _dovetail_y_offset(p):
     against base_d=45.0mm - a template that would silently split into 2
     disconnected solids in make_template() (see check_template_solid),
     previously only ever caught by accident, via check_cap_solid tripping
-    over the exact same defect in cap_end's shared groove-cutter code."""
+    over the exact same defect in cap_end's shared groove-cutter code.
+
+    NOTE on cy: this now calls _post_center(p) (back-biased, see _post_cy -
+    the nameplate-overlap fix) rather than the base_d/2 centering described
+    above. dx (=cx-dt_depth) and dy (the probe's Y half-reach at the
+    groove's deepest point) are UNCHANGED by that - both depend only on
+    cx/r, not cy - but the resulting `offset` grows since it's
+    cy + dy + tip + margin. Verified live via this function's own RESULT
+    BOUND assert below (not just assumed to still hold), and independently
+    via check_template_solid."""
     r = worst_case_socket_od_mm() / 2.0
-    cx, cy = p["base_w"] / 2.0, p["base_d"] / 2.0
+    cx, cy = _post_center(p)
     assert p["dt_depth"] < p["base_w"] / 2.0 - FUSE_EMBED, (
         "dt_depth %.2fmm not < base_w/2 - FUSE_EMBED (%.2fmm) - the groove "
         "side is no longer guaranteed to be the binding constraint over "
@@ -491,34 +608,34 @@ def make_dovetail_groove_cutter(p):
 # Geometry - nameplate pocket/block (top-of-base inset, straight press fit)
 # --------------------------------------------------------------------------
 
-def _post_front_edge_y(p):
-    """Real (measured, not hand-derived) Y of the front-most point of
-    either drive's post, via the post's own actual B-rep BoundBox - not
-    computed from af/post_corner_r by inspection, since the corner fillet
-    trims the raw square's corners without changing the flat edges' own
-    extent (see make_post), which is easy to get wrong by hand. Both
-    drives' posts share the same center (base_d/2), but the larger
-    across-flats (1-2in, drive_af_nominal=12.70 vs 3-8in's 9.53) makes for
-    a larger post footprint that reaches closer to the front wall - this
-    measures both live and returns whichever is actually tightest, rather
-    than assuming which drive is worse."""
-    return min(make_post(p, drive).BoundBox.YMin for drive in p["drives"])
-
-
 def _nameplate_pocket_xy(p):
     """World XY origin (min-X, min-Y corner) of the nameplate pocket
     CAVITY footprint (nameplate_w/h plus nameplate_clearance on every
     side) - centered in X on the template (base_w/2, the same X-center the
-    post itself uses) and centered in Y with real, live-measured margin
-    between the front wall (Y=0) and the closest drive's actual post front
-    edge (_post_front_edge_y), rather than a fixed guess. See check_
-    nameplate_fit's printed footprint-margin numbers for the actual live
-    measurement at the current dimensions."""
+    post itself uses).
+
+    Y placement used to be centered in the gap between the front wall and
+    the POST's own (small) front edge (_post_front_edge_y, since removed -
+    see git history). That was proven live to be the wrong thing to clear:
+    the post's own footprint is tiny (a few mm across), but the actual
+    worst-case SOCKET sitting on that post has a ~36mm-diameter circular
+    footprint, and that circle's own frontmost reach extended well past
+    the post's front edge - straight into the pocket. Clearing the post
+    was never the requirement; clearing the socket is.
+
+    So this now places the pocket in the front band bounded by the front
+    wall (Y=0) and the worst-case socket circle's own frontmost reach
+    (cy - r, from _post_cy/_post_center) - the same two boundaries _post_
+    cy solved cy against in the first place, using the identical
+    NAMEPLATE_MARGIN_MM on both sides, so the pocket lands snug against
+    both boundaries with real margin by construction: front edge at
+    NAMEPLATE_MARGIN_MM from the wall, back edge at NAMEPLATE_MARGIN_MM
+    (again) short of the socket circle's front reach. See check_socket_
+    nameplate_clearance() for the live B-rep proof that the resulting
+    pocket and the worst-case socket probe genuinely never overlap."""
     w = p["nameplate_w"] + 2 * p["nameplate_clearance"]
-    h = p["nameplate_h"] + 2 * p["nameplate_clearance"]
-    front_clear = _post_front_edge_y(p)
     x0 = p["base_w"] / 2.0 - w / 2.0
-    y0 = (front_clear - h) / 2.0
+    y0 = NAMEPLATE_MARGIN_MM
     return x0, y0
 
 
@@ -821,7 +938,7 @@ def check_post_fit(shape, p, drive):
     should show measurable overlap (that's the friction grip)."""
     af = p["drive_af_nominal"][drive]
     r = p["post_corner_r"]
-    cx, cy = p["base_w"] / 2.0, p["base_d"] / 2.0
+    cx, cy = _post_center(p)
     half = af / 2.0 - r
     pts = [App.Vector(cx + sx * half, cy + sy * half, p["base_h"] - 1)
            for sx, sy in ((1, 1), (-1, 1), (-1, -1), (1, -1))]
@@ -988,7 +1105,7 @@ def check_socket_od_clearance(p):
          it clears OD_CLEARANCE_FLOOR.
     """
     issues = []
-    cx, cy = p["base_w"] / 2.0, p["base_d"] / 2.0
+    cx, cy = _post_center(p)
     footprint = Part.makeBox(p["base_w"], p["base_d"], 500,
                               App.Vector(0, 0, -10))
     tail = make_dovetail_tail(p)
@@ -1029,6 +1146,45 @@ def check_socket_od_clearance(p):
             "worst-case OD: clearance margin %.2fmm at or below the "
             "%.2fmm floor - base footprint too tight for this socket's "
             "outer diameter" % (margin, OD_CLEARANCE_FLOOR))
+    return issues
+
+
+def check_socket_nameplate_clearance(p):
+    """Permanent regression guard for the actual design flaw this file's
+    post/nameplate repositioning fixed: a real worst-case socket sitting on
+    the post visually/physically overlapping the nameplate pocket, making
+    the label unreadable while that socket is stored.
+
+    Builds the same worst-case-OD probe cylinder check_socket_od_clearance
+    builds (centered on the post's real _post_center(p), radius
+    worst_case_socket_od_mm()/2.0, spanning the post's full height plus
+    headroom above the riser top) and the real nameplate pocket cavity
+    cutter (make_nameplate_pocket_cutter - the actual cut geometry,
+    already inflated by nameplate_clearance, not the smaller raw
+    nameplate_w/h footprint), and asserts their real B-rep intersection
+    (probe.common(cavity).Volume) is exactly 0.0 - not merely small.
+
+    This is the direct proof the fix works: previously (post centered at
+    cy=base_d/2=22.5mm), this exact same kind of probe-vs-pocket overlap
+    was nonzero (the pocket's Y-span sat inside the probe's own Y-reach -
+    see NAMEPLATE_MARGIN_MM's docstring for the discovered numbers). Any
+    future PARAMS change that reintroduces that overlap (e.g. shrinking
+    NAMEPLATE_MARGIN_MM, growing the nameplate, or hand-editing cy back to
+    a fixed centering) trips this check immediately."""
+    issues = []
+    cx, cy = _post_center(p)
+    r = worst_case_socket_od_mm() / 2.0
+    probe = Part.makeCylinder(r, p["post_h"] + 20,
+                               App.Vector(cx, cy, p["base_h"]))
+    cavity = make_nameplate_pocket_cutter(p)
+    overlap = probe.common(cavity).Volume
+    print("  worst-case socket probe (OD %.2fmm) vs nameplate pocket "
+          "cavity: overlap = %.6f mm3 (must be exactly 0)" % (r * 2, overlap))
+    if overlap > 0.0:
+        issues.append(
+            "worst-case socket probe overlaps the nameplate pocket cavity "
+            "by %.6f mm3 - a large socket resting on the post would sit "
+            "on top of the nameplate" % overlap)
     return issues
 
 
@@ -1221,6 +1377,17 @@ def run():
               "footprint (and stays clear of the dovetail tail/groove) by "
               "more than the %.2fmm floor" % OD_CLEARANCE_FLOOR)
 
+    print("\n--- socket/nameplate overlap self-check "
+          "(real cylinder probe vs real pocket cavity, direct B-rep) ---")
+    socket_nameplate_issues = check_socket_nameplate_clearance(PARAMS)
+    if socket_nameplate_issues:
+        for issue in socket_nameplate_issues:
+            print("SOCKET-NAMEPLATE: %s" % issue)
+    else:
+        print("the worst-case socket probe and the nameplate pocket cavity "
+              "have exactly zero volumetric overlap - a large socket "
+              "resting on the post can no longer sit on top of the label")
+
     printability_issues = []
     mesh_issues = []
     for name, shape in sorted(pieces.items()):
@@ -1250,6 +1417,8 @@ def run():
         "nameplate pocket/block fit check failed, see report above")
     assert not od_clearance_issues, (
         "socket OD clearance check failed, see report above")
+    assert not socket_nameplate_issues, (
+        "socket/nameplate overlap check failed, see report above")
     assert not printability_issues, "printability check failed, see report above"
     assert not mesh_issues, "mesh/watertight check failed, see report above"
 
