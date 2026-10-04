@@ -20,6 +20,7 @@ needed and nothing owed.
 | **[Whiteboard Caddy](whiteboard-stand/)** | Classroom desk caddy for lap whiteboards, markers and erasers | 244 × 159 × 94 mm | 7–12 h · ~350 g PETG · no supports | ✅ Printed and in use |
 | **[Whiteboard Caddy (3-eraser)](whiteboard-stand-3-eraser/)** | Variant with a third eraser bay and no carry handle | 244 × 159 × 94 mm | 7–12 h · ~380 g PETG · no supports | 🧪 Generated and checked, not yet printed |
 | **[Socket Organizer](socket-organizer/)** | Modular, interlinking socket holder, metric and SAE, 3/8" and 1/2" drive — 3 width tiers × 2 drives of size-agnostic templates + 2 shrunk caps + 1 blank nameplate, unlimited sizes labeled with your own slicer's text tool | 30–40 × 51 × 19 mm per template, tier-dependent (9 piece types total) | ~10–25 min/template · few g/piece · no supports | 🧪 Generated and checked, not yet printed |
+| **[French-Cleat Bins](french-cleat-bins/)** | One-piece Multiboard French-cleat wall bins — a screw bin for two 1 lb boxes of 3" deck screws, a shallow basket for loose parts in full and half width — plus matching 7- and 3-unit rails | Screw bin 189 × 71 × 70 mm · basket 189 × 124 × 50 mm · half basket 95 × 124 × 50 mm · rails 175 / 75 × 43 × 13 mm | 4–7 h/bin, 30–60 min/rail · ~85–160 g PETG/bin · bins: support under hook lip only | 🧪 Generated and checked, not yet printed |
 
 ---
 
@@ -53,6 +54,24 @@ Holds **8 lap boards** (9"×12"), **10 markers** and **24 eraser pads** in
 
 ---
 
+### [French-Cleat Bins](french-cleat-bins/)
+
+<img src="french-cleat-bins/images/screw-bin.png" alt="French-cleat screw bin" width="560">
+
+Wall bins for a Multiboard French cleat, plus the rail they hang on. The
+rail reproduces the one from the Multiboard French Cleat Storage Bins set,
+so the same snaps hold it. The original bins in that set are a body plus a
+glued-on side panel. These print as single parts, upright.
+
+The **screw bin** holds **2 × 1 lb boxes of 3" deck screws**, upright, with
+the lids free to open. The **shallow basket** is the same width, twice as
+deep, and has a low sloped front for **loose parts**. It also comes at half the width. Each bin prints in one
+piece; the only support is a thin strip under the hook lip.
+
+[Details and print files →](french-cleat-bins/README.md)
+
+---
+
 ## Safety
 
 These are files, not finished products. A printed part is only as good as the
@@ -65,6 +84,9 @@ judging whether what comes off your bed is fit for the job.
   safe for food, drink or anything that goes in a mouth, whatever the filament.
 - **Check before loading.** Inspect prints for weak layer adhesion or cracks
   before putting weight on them, and re-check parts that get handled hard.
+- **Wall-hung parts.** Anything that hangs on a cleat or rail is only as
+  secure as the rail's own mounting. Don't hang it above head height or
+  over where people work, and don't load it beyond what it was sized for.
 - **Mind the material.** PLA softens in a hot car or a sunny window. The models
   here specify PETG where heat or toughness matters — substitute knowingly.
 
