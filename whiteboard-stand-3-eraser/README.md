@@ -16,10 +16,10 @@ holds **8 lap boards** (9"×12"), **10 markers** and **24 eraser pads** in
 |---|---|
 | Size | 244 × 159 × 94 mm |
 | Print time | 7–12 h, depending on printer and settings |
-| Material | ~350 g PETG (more with the third eraser box) |
+| Material | ~380 g PETG |
 | Supports | None |
 | Bed needed | 256 × 256 mm or larger |
-| Status | Generated and checked (fit/printability/mesh); not yet printed |
+| Status | Printed |
 
 ## Print these
 
