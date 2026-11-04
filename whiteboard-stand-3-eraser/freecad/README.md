@@ -8,14 +8,13 @@ This is a variant of the original whiteboard caddy
 added and the carry handle was removed.
 
 Generated parametrically by [`build_caddy.py`](build_caddy.py) in FreeCAD.
-Checked (fit/printability/mesh) but not yet printed. Licensed MIT — see
-[LICENSE](../../LICENSE);
+Printed. Licensed MIT — see [LICENSE](../../LICENSE);
 free for personal and commercial use.
 
 Developed on a **Bambu Lab X2D** in **PETG**, but nothing is specific to that
 printer beyond the bed-size check.
 
-Size: **244 × 159 × 94 mm**, ~601 cm³ solid.
+Size: **244 × 159 × 94 mm**, ~672 cm³ solid.
 
 ---
 
@@ -31,7 +30,7 @@ depth gauge, all at the exact dimensions the real part uses.
 3. An eraser pad clears the bay-wall gauge.
 
 If any of those are wrong, change **one number** in `PARAMS` and re-run. Don't
-print the 601 cm³ body until the coupon passes — the tolerances that matter
+print the 672 cm³ body until the coupon passes — the tolerances that matter
 depend on the markers and boards *you* own.
 
 | If… | Change |
@@ -144,15 +143,17 @@ used, not a live driver — edit `PARAMS` in the script and re-run.
 | Supports | **None** — print flat on the base as oriented |
 | Brim | Not required on textured PEI |
 
-These are the settings the caddy in the photos was printed with, and it has
-held up in daily classroom use. Two wall loops at 0.4 mm leaves the 2.5 mm
+These are the settings the original two-box caddy was printed with, and it has
+held up to daily classroom use. Two wall loops at 0.4 mm leaves the 2.5 mm
 tube walls part solid perimeter and part gap fill; raising wall loops to 4
 would make them solid throughout. That has not been printed or tested, so
 treat it as an option rather than a recommendation.
 
 ### Reference slice
 
-Bambu Studio, Bambu Lab X2D, PETG, 0.4 mm nozzle, at the settings above:
+This slice is of the **original two-box caddy**, for reference. This variant
+has about 12% more solid volume (672 vs. 601 cm³), so expect its numbers to run
+higher. Bambu Studio, Bambu Lab X2D, PETG, 0.4 mm nozzle, at the settings above:
 
 | | |
 |---|---|
@@ -162,7 +163,7 @@ Bambu Studio, Bambu Lab X2D, PETG, 0.4 mm nozzle, at the settings above:
 | Filament changes | 0 |
 | Cost estimate | 6.25, at the price set in the filament profile |
 
-Expect **7–12 h** and **~350 g** across printers and profiles. Time moves a lot
+Expect **7–12 h** and **~380 g** across printers and profiles. Time moves a lot
 with layer height, speed profile and machine; filament barely moves at all,
 since it is set by the geometry.
 

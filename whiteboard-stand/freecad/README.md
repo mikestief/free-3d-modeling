@@ -139,8 +139,8 @@ used, not a live driver — edit `PARAMS` in the script and re-run.
 | Supports | **None** — print flat on the base as oriented |
 | Brim | Not required on textured PEI |
 
-These are the settings the caddy in the photos was printed with, and it has
-held up in daily classroom use. Two wall loops at 0.4 mm leaves the 2.5 mm
+These are the settings the caddy in classroom use was printed with, and it has
+held up to daily use. Two wall loops at 0.4 mm leaves the 2.5 mm
 tube walls part solid perimeter and part gap fill; raising wall loops to 4
 would make them solid throughout. That has not been printed or tested, so
 treat it as an option rather than a recommendation.

@@ -11,6 +11,8 @@ committed, so **you don't need FreeCAD unless you want to change something**.
 Print them, sell them, modify them, put them in a product — no permission
 needed and nothing owed.
 
+Every model listed here has been printed, not just simulated.
+
 ---
 
 ## The models
@@ -18,8 +20,8 @@ needed and nothing owed.
 | Model | What it is | Size | Print | Status |
 |---|---|---|---|---|
 | **[Whiteboard Caddy](whiteboard-stand/)** | Classroom desk caddy for lap whiteboards, markers and erasers | 244 × 159 × 94 mm | 7–12 h · ~350 g PETG · no supports | ✅ Printed and in use |
-| **[Whiteboard Caddy (3-eraser)](whiteboard-stand-3-eraser/)** | Variant with a third eraser bay and no carry handle | 244 × 159 × 94 mm | 7–12 h · ~380 g PETG · no supports | 🧪 Generated and checked, not yet printed |
-| **[Socket Organizer](socket-organizer/)** | Modular, interlinking socket holder, metric and SAE, 3/8" and 1/2" drive — 3 width tiers × 2 drives of size-agnostic templates + 2 shrunk caps + 1 blank nameplate, unlimited sizes labeled with your own slicer's text tool | 30–40 × 51 × 19 mm per template, tier-dependent (9 piece types total) | ~10–25 min/template · few g/piece · no supports | 🧪 Generated and checked, not yet printed |
+| **[Whiteboard Caddy (3-eraser)](whiteboard-stand-3-eraser/)** | Variant with a third eraser bay and no carry handle | 244 × 159 × 94 mm | 7–12 h · ~380 g PETG · no supports | ✅ Printed |
+| **[Socket Organizer](socket-organizer/)** | Modular snap-together socket holder for metric and SAE sockets, 3/8" and 1/2" drive | 30–40 × 51 × 19 mm per template | ~10–25 min/template · up to ~20 g each · no supports | ✅ Printed |
 
 ---
 
@@ -53,6 +55,21 @@ Holds **8 lap boards** (9"×12"), **10 markers** and **24 eraser pads** in
 
 ---
 
+### [Socket Organizer](socket-organizer/)
+
+A modular socket holder you build out to match the sockets you own. Each
+socket stands on a post sized to its drive square, and friction holds it in
+place, with no magnets. Pieces join with a dovetail: press one straight down
+to seat it, lift it straight up to remove it.
+
+Holds **metric and SAE sockets** in **3/8" and 1/2" drive**, up to about
+36 mm across. Label each one with a nameplate you print using your slicer's
+text tool. Pieces are small, and several fit on one plate with no supports.
+
+[Details and print files →](socket-organizer/README.md)
+
+---
+
 ## Safety
 
 These are files, not finished products. A printed part is only as good as the
@@ -74,9 +91,12 @@ Provided as-is, with no warranty — see [LICENSE](LICENSE).
 
 ## Printing any of these
 
-1. **Print the fit coupon first.** Every model here ships one — a small part
-   carrying each critical dimension, so you spend 20 minutes finding out a
-   marker is 0.5 mm too tight instead of a whole overnight print.
+Each model's README links the files to print. Use the `.3mf` or `.stl` in your
+slicer; the `.step` is for taking the part into other CAD software.
+
+1. **Print the fit coupon first.** Every model here ships at least one — a
+   small part carrying each critical dimension, so you spend 20 minutes finding
+   out a marker is 0.5 mm too tight instead of a whole overnight print.
 2. If the coupon fits, print the real thing.
 3. If it doesn't, change one number in the script and re-run.
 
@@ -84,11 +104,17 @@ The coupon exists because the tolerances that matter — how a marker sits in a
 tube, how a board slides into a channel — depend on the objects *you* own, not
 the ones the model was designed around.
 
+Bambu Studio will say **"The 3mf file has invalid config, load geometry data
+only"** when you open these files. That is normal and harmless; click OK. The
+files contain geometry but no slicer settings.
+
 ---
 
 ## Regenerating a model
 
-Needs FreeCAD 1.0 or newer. No other dependencies.
+You only need this if you change something. It requires FreeCAD 1.0 or newer
+and nothing else. Each model has its own `build_*.py` script; this example
+builds the whiteboard caddy:
 
 ```bash
 cd whiteboard-stand/freecad
